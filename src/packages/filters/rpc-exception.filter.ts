@@ -13,13 +13,13 @@ export interface RpcErrorPayload {
 
 /**
  * Registered as a *microservice-scoped* global filter in `main.ts`
- * (`kafkaMicroservice.useGlobalFilters(...)`) — every `@MessagePattern` handler gets it
+ * (`rmqMicroservice.useGlobalFilters(...)`) — every `@MessagePattern` handler gets it
  * automatically, no per-controller `@UseFilters(RpcExceptionFilter)` needed. It is never passed
  * to `app.useGlobalFilters()` on the main HTTP `app`, so the HTTP side keeps using
  * `HttpExceptionFilter` untouched (this filter reads an RPC context, not an Express `Response`).
- * The gateway's `ClientKafka` has no notion of `HttpException`; this normalizes whatever a
+ * The gateway's `ClientRMQ` has no notion of `HttpException`; this normalizes whatever a
  * message-pattern handler throws into a plain, JSON-serializable error object the caller's
- * `KafkaProducer.send` helper can turn back into the right `HttpException`.
+ * `RmqProducer.send` helper can turn back into the right `HttpException`.
  */
 @Catch()
 export class RpcExceptionFilter implements ExceptionFilter {
@@ -33,7 +33,7 @@ export class RpcExceptionFilter implements ExceptionFilter {
           : ((response as { message?: string | string[] })?.message ?? exception.message);
       const errors =
         typeof response === 'object' ? (response as { errors?: unknown }).errors : undefined;
-      // If this exception is `KafkaProducer.send()` rethrowing another service's error, its
+      // If this exception is `RmqProducer.send()` rethrowing another service's error, its
       // response body already carries the origin's `serviceName` — preserve it instead of
       // overwriting with our own.
       const serviceName =

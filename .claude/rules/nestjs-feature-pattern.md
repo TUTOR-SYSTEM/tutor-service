@@ -82,16 +82,13 @@ this is now an education / tutoring domain.)
   (`@packages/helpers`), `ZodValidationPipe` (`@packages/pipes`), `@CurrentUser`/`@Public`/
   `@Admin` (`@packages/decorators`). Never re-implement pagination, validation, or UUID checks,
   and do not use the old `@User` decorator.
-- **Infra modules** (`src/features/rabbitmq/*` — the only one left here; `redis`/`email`/
-  `uploads` moved to `third-service`, which owns them) are a deliberate exception to the
-  layering above — they wrap an external connection, not a domain resource, so there is no
-  repository and normally no controller. Shape: `@Global()` module, one `Service` owning the
-  connection lifecycle (`OnModuleInit`/`OnModuleDestroy`, reads its URL from `ConfigService`,
-  logs via `Logger` not `console.log`), exported so any feature can inject it directly (no need
-  to add it to that feature's `imports`). For pub/sub (`rabbitmq`), split publish/consume into
-  separate `Producer`/`Consumer` classes that take the connection service in their constructor
-  rather than piling methods onto the connection `Service` itself. See `RabbitMQModule`
-  (`RabbitMQService` + `RabbitMQProducer` + `RabbitMQConsumer`) as the reference.
+- **Infra modules**: none live here any more (`redis`/`email`/`uploads` moved to
+  `third-service`; the old `rabbitmq` pub/sub module was removed). If one is added, it's a
+  deliberate exception to the layering above: `@Global()` module, one `Service` owning the
+  connection lifecycle (`OnModuleInit`/`OnModuleDestroy`, config via `ConfigService`, `Logger`
+  not `console.log`), exported so any feature can inject it directly. Inbound RPC is the RMQ
+  microservice `main.ts` opens on `tutor_queue`; if this service ever needs to *call* another
+  one, copy gateway's `src/features/rabbitmq/` (`RmqModule`/`RmqProducer`) as `user` did.
 - **`src/features/user/*`** is a deliberate exception too — a read-only lookup (`getUserByField`)
   against the shared `users` table (this DB and `user`'s DB are the same Postgres instance).
   No controller, no `.rpc.controller.ts`, not a domain feature — don't add write methods or a

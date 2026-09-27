@@ -48,7 +48,7 @@ already kept in sync with the real domain — this `CLAUDE.md` was not, until no
 | Framework        | NestJS 11                                                |
 | Language         | TypeScript 5 (strictNullChecks only)                     |
 | Database         | PostgreSQL via Drizzle ORM (`postgres.js`/`pg` drivers)  |
-| Inter-service    | RabbitMQ — `rabbitmq` pub/sub feature (active); `@nestjs/microservices` RMQ listener on `tutor_queue` is wired up in `main.ts` and every feature except `chat`/`user` has a `{name}.rpc.controller.ts` responder (12 features — see architecture.md) |
+| Inter-service    | RabbitMQ — `@nestjs/microservices` RMQ listener on `tutor_queue` is wired up in `main.ts` and every feature except `chat`/`user` has a `{name}.rpc.controller.ts` responder (12 features — see architecture.md) |
 | Authentication   | Passport JWT (access + refresh), same secrets as `gateway`/`user` |
 | Validation       | Zod v4 (via custom `ZodValidationPipe`)                  |
 | API Docs         | @nestjs/swagger (note: title/description in `main.ts` still say "financial management system" — stale, harmless) |
@@ -117,8 +117,7 @@ src/
 │                                  # (categories/wallets/transactions are commented out — dead code
 │                                  # left in the file, not live tables)
 ├── features/                     # class, schedule, session, curriculum, chapter, lesson, tuition,
-│                                  # exercise, attendance, chat, report, dashboard, agents, user,
-│                                  # rabbitmq (pub/sub infra)
+│                                  # exercise, attendance, chat, report, dashboard, agents, user
 └── packages/                     # Shared utilities (import via @packages/*)
     ├── configs/ decorators/ entities/ filters/ guards/ helpers/ interceptor/ interfaces/
     │   pipes/ strategy/  — same shape as `user`/`gateway`
@@ -166,8 +165,7 @@ controller, no RPC — see its own doc comment) rather than an owned domain feat
 | `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET` | Must match `user`/`gateway`'s secrets |
 | `JWT_ACCESS_EXPIRES_SECONDS` / `JWT_REFRESH_EXPIRES_SECONDS` | Token TTLs |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_CALLBACK_URL` | Referenced but OAuth flows actually live in `gateway`/`user` — check before assuming this repo needs them configured |
-| `RABBITMQ_URL`                | RabbitMQ connection URL         |
-| `RABBITMQ_EXCHANGE`           | Topic exchange for pub/sub (default `app.events`) |
+| `RABBITMQ_URL`                | RabbitMQ connection URL (local `amqp://admin:admin@localhost:5672`; Railway: RabbitMQ service private URL) |
 | `TUTOR_QUEUE`                 | RMQ listener queue name (default `tutor_queue`) |
 
 No `REDIS_*`, `AWS_*`, `CLOUDINARY_*`, `MAIL_*`, or `RESEND_*` vars are read anywhere in `src/`

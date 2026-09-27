@@ -9,7 +9,7 @@ import { TuitionService } from './tuition.service';
 
 /**
  * Message-pattern mirror of `TuitionController` — reached only by the gateway's `TUTOR_SERVICE`
- * `ClientProxy` over Kafka. Delegates to the same, unmodified
+ * `ClientProxy` over RabbitMQ. Delegates to the same, unmodified
  * `TuitionService` the HTTP controller uses; no business logic lives here.
  */
 @Controller()

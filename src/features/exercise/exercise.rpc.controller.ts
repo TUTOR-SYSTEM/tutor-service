@@ -10,7 +10,7 @@ import { ExerciseService } from './exercise.service';
 
 /**
  * Message-pattern mirror of `ExerciseController` — reached only by the gateway's `TUTOR_SERVICE`
- * `ClientProxy` over Kafka. Delegates to the same, unmodified
+ * `ClientProxy` over RabbitMQ. Delegates to the same, unmodified
  * `ExerciseService` the HTTP controller uses; no business logic lives here.
  */
 @Controller()

@@ -9,7 +9,7 @@ import { ChapterService } from './chapter.service';
 
 /**
  * Message-pattern mirror of `ChapterController` — reached only by the gateway's `TUTOR_SERVICE`
- * `ClientProxy` over Kafka. Delegates to the same, unmodified
+ * `ClientProxy` over RabbitMQ. Delegates to the same, unmodified
  * `ChapterService` the HTTP controller uses; no business logic lives here.
  */
 @Controller()

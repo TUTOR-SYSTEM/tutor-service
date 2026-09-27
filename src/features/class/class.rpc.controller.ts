@@ -10,7 +10,7 @@ import { ClassService } from './class.service';
 
 /**
  * Message-pattern mirror of `ClassController` — reached only by the gateway's `TUTOR_SERVICE`
- * `ClientProxy` over Kafka. Delegates to the same, unmodified
+ * `ClientProxy` over RabbitMQ. Delegates to the same, unmodified
  * `ClassService` the HTTP controller uses; no business logic lives here.
  */
 @Controller()

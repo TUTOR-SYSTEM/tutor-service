@@ -17,9 +17,9 @@ tutor-service/
 │   │                               # exercises, conversations, conversation_participants, messages
 │   │                               # (categories/wallets/transactions are commented-out dead code)
 │   ├── features/                  # class, schedule, session, curriculum, chapter, lesson, tuition,
-│   │                               # exercise, attendance, chat, report, dashboard, agents, user,
-│   │                               # rabbitmq (pub/sub infra — no email/redis/uploads features here,
-│   │                               # those live in `third-service`)
+│   │                               # exercise, attendance, chat, report, dashboard, agents, user
+│   │                               # (no email/redis/uploads features here — those live in
+│   │                               # `third-service`; no message-queue module — responder only)
 │   └── packages/                  # Shared utilities
 │       ├── configs/               # JWT sign config
 │       ├── decorators/            # @ApiResponse, @Public, @Roles, @CurrentUser decorators
@@ -70,7 +70,7 @@ RMQ listener on that queue. **All 12 owned features have `@MessagePattern` respo
 | `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET` | Must match `gateway`/`user` |
 | `JWT_ACCESS_EXPIRES_SECONDS` / `JWT_REFRESH_EXPIRES_SECONDS` | Token TTLs |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_CALLBACK_URL` | Referenced in code but OAuth actually happens in `gateway`/`user` |
-| `RABBITMQ_URL` / `RABBITMQ_EXCHANGE` | RabbitMQ connection + pub/sub exchange |
+| `RABBITMQ_URL`                | RabbitMQ connection (local `amqp://admin:admin@localhost:5672`; Railway: RabbitMQ service private URL) |
 | `TUTOR_QUEUE`                 | RMQ listener queue (default `tutor_queue`) |
 
 No `REDIS_*`/`MAIL_*`/`AWS_*`/`CLOUDINARY_*`/`RESEND_*` vars are read anywhere in `src/` —

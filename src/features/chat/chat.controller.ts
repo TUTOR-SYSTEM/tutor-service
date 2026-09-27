@@ -1,4 +1,13 @@
-import { Controller, Get, Post, Body, Param, Query, Req } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  Query,
+  Req,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { ConversationService } from './conversation.service';
 import { MessageService } from './message.service';
@@ -26,7 +35,7 @@ export class ChatController {
   async getConversations(@Req() req: RequestWithUser) {
     const userId = req.user?.id;
     if (!userId) {
-      return { statusCode: 401, message: 'Unauthorized' };
+      throw new UnauthorizedException();
     }
     return this.conversationService.getConversations(userId);
   }
@@ -36,7 +45,7 @@ export class ChatController {
   async getChatableUsers(@Req() req: RequestWithUser) {
     const userId = req.user?.id;
     if (!userId) {
-      return { statusCode: 401, message: 'Unauthorized' };
+      throw new UnauthorizedException();
     }
     return this.conversationService.getChatableUsers(userId);
   }
@@ -46,7 +55,7 @@ export class ChatController {
   async getUnreadCounts(@Req() req: RequestWithUser) {
     const userId = req.user?.id;
     if (!userId) {
-      return { statusCode: 401, message: 'Unauthorized' };
+      throw new UnauthorizedException();
     }
     return this.messageService.getUnreadCounts(userId);
   }
@@ -56,7 +65,7 @@ export class ChatController {
   async getConversation(@Param('id') id: string, @Req() req: RequestWithUser) {
     const userId = req.user?.id;
     if (!userId) {
-      return { statusCode: 401, message: 'Unauthorized' };
+      throw new UnauthorizedException();
     }
     return this.conversationService.getConversationById(id, userId);
   }
@@ -71,7 +80,7 @@ export class ChatController {
   ) {
     const userId = req?.user?.id;
     if (!userId) {
-      return { statusCode: 401, message: 'Unauthorized' };
+      throw new UnauthorizedException();
     }
     const messageLimit = limit ? parseInt(limit, 10) : 50;
     return this.messageService.getMessages(id, userId, messageLimit, before);
@@ -85,7 +94,7 @@ export class ChatController {
   ) {
     const userId = req.user?.id;
     if (!userId) {
-      return { statusCode: 401, message: 'Unauthorized' };
+      throw new UnauthorizedException();
     }
     return this.conversationService.createDirectConversation(userId, body.targetUserId);
   }
@@ -98,7 +107,7 @@ export class ChatController {
   ) {
     const userId = req.user?.id;
     if (!userId) {
-      return { statusCode: 401, message: 'Unauthorized' };
+      throw new UnauthorizedException();
     }
     return this.conversationService.createGroupConversation(userId, body.name, body.participantIds);
   }
@@ -108,7 +117,7 @@ export class ChatController {
   async createClassConversation(@Param('classId') classId: string, @Req() req: RequestWithUser) {
     const userId = req.user?.id;
     if (!userId) {
-      return { statusCode: 401, message: 'Unauthorized' };
+      throw new UnauthorizedException();
     }
     return this.conversationService.createClassConversation(userId, classId);
   }
@@ -122,7 +131,7 @@ export class ChatController {
   ) {
     const userId = req.user?.id;
     if (!userId) {
-      return { statusCode: 401, message: 'Unauthorized' };
+      throw new UnauthorizedException();
     }
     return this.conversationService.addParticipant(id, userId, body.userId);
   }
@@ -132,7 +141,7 @@ export class ChatController {
   async markAsRead(@Param('id') id: string, @Req() req: RequestWithUser) {
     const userId = req.user?.id;
     if (!userId) {
-      return { statusCode: 401, message: 'Unauthorized' };
+      throw new UnauthorizedException();
     }
     await this.messageService.markConversationAsRead(id, userId);
     return { message: 'Marked as read' };

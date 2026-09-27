@@ -8,7 +8,7 @@ import { CurriculumService } from './curriculum.service';
 
 /**
  * Message-pattern mirror of `CurriculumController` — reached only by the gateway's `TUTOR_SERVICE`
- * `ClientProxy` over Kafka. Delegates to the same, unmodified
+ * `ClientProxy` over RabbitMQ. Delegates to the same, unmodified
  * `CurriculumService` the HTTP controller uses; no business logic lives here.
  */
 @Controller()

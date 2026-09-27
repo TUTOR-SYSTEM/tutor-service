@@ -5,7 +5,7 @@ import { AgentsService } from './agents.service';
 
 /**
  * Message-pattern mirror of the AI-assistant endpoints (`/ai-chat`) — reached only by the
- * gateway's `TUTOR_SERVICE` `ClientProxy` over Kafka.
+ * gateway's `TUTOR_SERVICE` `ClientProxy` over RabbitMQ.
  * Delegates to `AgentsService` (the same service the `/run` HTTP controller uses) plus its
  * in-memory per-user chat history; no business logic lives here.
  */

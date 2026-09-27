@@ -5,7 +5,7 @@ import { ReportService } from './report.service';
 
 /**
  * Message-pattern mirror of `ReportController` (admin-only) — reached only by the gateway's
- * `TUTOR_SERVICE` `ClientProxy` over Kafka. Delegates to the
+ * `TUTOR_SERVICE` `ClientProxy` over RabbitMQ. Delegates to the
  * same, unmodified `ReportService` the HTTP controller uses; no business logic lives here.
  */
 @Controller()
