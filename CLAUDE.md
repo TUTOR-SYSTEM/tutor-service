@@ -20,7 +20,7 @@ already kept in sync with the real domain — this `CLAUDE.md` was not, until no
 1. Read `CLAUDE.md` and `.claude/rules/*.md` for conventions
 2. Read the specific feature module: `src/features/{name}/*`
 3. Read related entities: `src/packages/entities/{name}/*`
-4. Read database schema only if modifying tables: `src/database/schema.ts`
+4. Read database schema only if modifying tables: `../gateway/src/database/schema.ts` (canonical, this repo has no local copy)
 5. Read `app.module.ts` only when registering new modules
 
 ### When fixing a bug:
@@ -37,7 +37,7 @@ already kept in sync with the real domain — this `CLAUDE.md` was not, until no
 ### Files to read ONLY when necessary:
 - `src/main.ts` — Only when changing bootstrap or the RMQ listener setup
 - `src/app.module.ts` — Only when adding/removing modules
-- `src/database/schema.ts` — Only when modifying database schema
+- `../gateway/src/database/schema.ts` — Only when modifying database schema (canonical since 2026-09-28; this repo has no local copy)
 - `src/packages/helpers/*` — Only when using specific helpers
 - `src/data/constants/*` — Only when adding error/success messages
 
@@ -85,11 +85,9 @@ bun run test:cov          # Unit tests with coverage
 bun run test:e2e          # E2E tests
 bun run test:debug        # Debug tests with inspect
 
-# Database (Drizzle)
-bun run db:generate       # Generate migration SQL from schema changes
-bun run db:migrate        # Run pending migrations
-bun run db:push           # Push schema directly (dev only)
-bun run db:studio         # Open Drizzle Studio
+# Database (Drizzle) — schema + migrations now live in ../gateway (2026-09-28 consolidation).
+# This repo has no local db:generate/db:migrate/db:push/db:studio anymore; run those from
+# gateway. See `.claude/rules/database.md`.
 
 # Database Seeds (scripts/*.ts, Bun runtime)
 bun run db:seed:user / users-bulk / categories / grades / wallet / edu-flow / dashboard / curriculum-demo
@@ -109,13 +107,16 @@ src/
 ├── app.module.ts                 # Root module (imports all feature modules)
 ├── app.controller.ts / app.service.ts   # Health-check
 ├── database/
-│   ├── database.module.ts        # Global Drizzle ORM provider (postgres.js)
-│   └── schema.ts                 # Real tables: users, grades, classes, class_students, schedules,
-│                                  # class_sessions, curriculums, chapters, lessons, tuitions,
-│                                  # notifications, student_scores, ai_messages, attendances,
-│                                  # exercises, conversations, conversation_participants, messages
-│                                  # (categories/wallets/transactions are commented out — dead code
-│                                  # left in the file, not live tables)
+│   └── database.module.ts        # Global Drizzle ORM provider (postgres.js) — schema imported
+│                                  # from `@tutor/gateway/schema` (../gateway, canonical since
+│                                  # 2026-09-28); no local schema.ts/drizzle.config.ts anymore.
+│                                  # Real tables owned by this repo: classes, class_students,
+│                                  # schedules, class_sessions, curriculums, chapters, lessons,
+│                                  # tuitions, student_scores, ai_messages, attendances,
+│                                  # exercises, conversations, conversation_participants,
+│                                  # messages (users/grades owned by `user`; notifications
+│                                  # owned by `third-service` — imported from the same shared
+│                                  # schema package but this repo doesn't query them)
 ├── features/                     # class, schedule, session, curriculum, chapter, lesson, tuition,
 │                                  # exercise, attendance, chat, report, dashboard, agents, user
 └── packages/                     # Shared utilities (import via @packages/*)

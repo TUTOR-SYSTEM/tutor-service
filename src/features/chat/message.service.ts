@@ -2,7 +2,7 @@ import { Inject, Injectable, ForbiddenException } from '@nestjs/common';
 import { DRIZZLE } from '../../database/database.module';
 import { type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { eq, and, desc, sql } from 'drizzle-orm';
-import { messages, conversationParticipants, conversations } from '../../database/schema';
+import { messages, conversationParticipants, conversations } from '@tutor/gateway/schema';
 
 @Injectable()
 export class MessageService {

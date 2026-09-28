@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { DRIZZLE } from '../../database/database.module';
-import { users } from '../../database/schema';
+import { users } from '@tutor/gateway/schema';
 
 const USER_FIELD_COLUMN_MAP = {
   id: users.id,

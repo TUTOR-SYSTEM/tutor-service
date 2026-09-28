@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { and, count, countDistinct, eq, gte, inArray, lte, sql, type SQL } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { DRIZZLE } from '../../database/database.module';
-import { classes, classStudents, exercise, lessons, sessions, users } from '../../database/schema';
+import { classes, classStudents, exercise, lessons, sessions, users } from '@tutor/gateway/schema';
 import { buildListWhereClause } from '@packages/helpers';
 
 export interface ClassAggregate {

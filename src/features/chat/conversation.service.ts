@@ -9,7 +9,7 @@ import {
   users,
   classes,
   classStudents,
-} from '../../database/schema';
+} from '@tutor/gateway/schema';
 
 type UserRole = 'STUDENT' | 'ADMIN' | 'TUTOR' | 'PARENT';
 

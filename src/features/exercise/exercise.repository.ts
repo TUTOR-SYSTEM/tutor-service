@@ -7,7 +7,7 @@ import type {
   ExerciseDetailDto,
   getExerciseDto,
 } from '@packages/entities/exercise';
-import { classes, exercise, sessions, users } from 'src/database/schema';
+import { classes, exercise, sessions, users } from '@tutor/gateway/schema';
 
 type ExerciseRow = typeof exercise.$inferSelect;
 

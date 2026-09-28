@@ -8,7 +8,7 @@ import {
   GetSessionsQueryDto,
   UpdateSessionDto,
 } from '@packages/entities/session';
-import { chapters, classStudents, classes, lessons, sessions, users } from 'src/database/schema';
+import { chapters, classStudents, classes, lessons, sessions, users } from '@tutor/gateway/schema';
 import { buildListWhereClause } from '@packages/helpers';
 
 @Injectable()

@@ -3,7 +3,7 @@ import { DRIZZLE } from 'src/database/database.module';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { v4 as uuidv4 } from 'uuid';
 import { type CreateLessonBodyDto, type UpdateLessonDto } from '@packages/entities';
-import { lessons } from 'src/database/schema';
+import { lessons } from '@tutor/gateway/schema';
 import { and, count, eq } from 'drizzle-orm';
 
 @Injectable()

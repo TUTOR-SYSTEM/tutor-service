@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { and, countDistinct, eq, gte, gt, inArray, lte, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { DRIZZLE } from '../../database/database.module';
-import { classStudents, classes, sessions, tuitions } from '../../database/schema';
+import { classStudents, classes, sessions, tuitions } from '@tutor/gateway/schema';
 
 export interface TodayScheduleRow {
   id: string;

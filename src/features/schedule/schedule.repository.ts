@@ -8,7 +8,7 @@ import {
   GetSchedulesQueryDto,
   UpdateScheduleDto,
 } from '@packages/entities/schedule';
-import { classStudents, classes, schedules } from 'src/database/schema';
+import { classStudents, classes, schedules } from '@tutor/gateway/schema';
 import { buildListWhereClause } from '@packages/helpers';
 
 @Injectable()

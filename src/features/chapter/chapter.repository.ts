@@ -3,7 +3,7 @@ import { DRIZZLE } from 'src/database/database.module';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { v4 as uuidv4 } from 'uuid';
 import { type CreateChapterDto, type UpdateChapterDto } from '@packages/entities';
-import { chapters } from 'src/database/schema';
+import { chapters } from '@tutor/gateway/schema';
 import { count, eq } from 'drizzle-orm';
 
 @Injectable()

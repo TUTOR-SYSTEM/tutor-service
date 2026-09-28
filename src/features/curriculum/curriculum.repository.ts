@@ -3,7 +3,7 @@ import { DRIZZLE } from 'src/database/database.module';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { v4 as uuidv4 } from 'uuid';
 import { type CreateCurriculumDto, UpdateCurriculumDto } from '@packages/entities';
-import { chapters, curriculums, lessons } from 'src/database/schema';
+import { chapters, curriculums, lessons } from '@tutor/gateway/schema';
 import { buildListWhereClause } from '@packages/helpers';
 import { asc, count, eq, getTableColumns, sql } from 'drizzle-orm';
 
