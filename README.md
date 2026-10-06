@@ -241,6 +241,7 @@ See `.env.example` for all options. Key variables:
 | Variable | Description |
 |---|---|
 | `PORT` | API server port (default: 8888) |
+| `SERVICE_HOST` | Optional service address sent as `host` in request logs (default: `<service-name>:$PORT`) |
 | `DATABASE_URL` | PostgreSQL connection string |
 | `POSTGRES_*` | Alternative DB config (used if DATABASE_URL not set) |
 | `JWT_ACCESS_SECRET` | JWT signing secret for access tokens (UUID) |

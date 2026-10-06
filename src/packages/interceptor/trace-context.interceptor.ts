@@ -11,6 +11,13 @@ import {
 import { emitRequestLog } from '@packages/context/log-sink';
 
 const SERVICE_NAME = 'tutor-service';
+const DEFAULT_PORT = 8888;
+
+/** Service address reported on each RPC hop log: `SERVICE_HOST`, else `${SERVICE_NAME}:${PORT}`. */
+export function resolveServiceHost(): string {
+  return process.env.SERVICE_HOST || `${SERVICE_NAME}:${process.env.PORT || DEFAULT_PORT}`;
+}
+
 const MAX_LOG_LENGTH = 1000;
 const SENSITIVE_KEYS = [
   'password',
@@ -149,6 +156,7 @@ export class TraceContextInterceptor implements NestInterceptor {
               if (!isLogPattern) {
                 emitRequestLog({
                   serviceName: SERVICE_NAME,
+                  host: resolveServiceHost(),
                   type: 'RPC',
                   path: pattern,
                   durationMs: Date.now() - startTime,
@@ -167,6 +175,7 @@ export class TraceContextInterceptor implements NestInterceptor {
               if (!isLogPattern) {
                 emitRequestLog({
                   serviceName: SERVICE_NAME,
+                  host: resolveServiceHost(),
                   type: 'RPC',
                   path: pattern,
                   durationMs: Date.now() - startTime,

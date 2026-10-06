@@ -162,6 +162,7 @@ controller, no RPC — see its own doc comment) rather than an owned domain feat
 | ----------------------------- | ------------------------------- |
 | `NODE_ENV`                    | Environment mode                |
 | `PORT`                        | Server port (default `8888` — must be unique when running alongside the other 3 services) |
+| `SERVICE_HOST`                | Optional service address reported in request logs (`host`), e.g. `tutor-service:50051` (default `tutor-service:${PORT}`) |
 | `DATABASE_URL`                | Postgres connection URL         |
 | `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET` | Must match `user`/`gateway`'s secrets |
 | `JWT_ACCESS_EXPIRES_SECONDS` / `JWT_REFRESH_EXPIRES_SECONDS` | Token TTLs |
