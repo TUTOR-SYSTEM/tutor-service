@@ -158,6 +158,27 @@ export class ClassService {
   }
 
   //todo : get detail class service ...
+  // shared read gate: owner (tutor), enrolled student, or parent of an enrolled student.
+  // Missing class and no access both surface as NotFound.
+  private async loadAccessibleClass({ userId, id }: { userId: string; id: string }) {
+    if (!userId || !checkUuidValid({ data: userId }))
+      throw new BadRequestException(ERROR_MESSAGES.USER_ID_MUST_BE_UUID);
+    if (!id || !checkUuidValid({ data: id }))
+      throw new BadRequestException(ERROR_MESSAGES.CLASS_ID_MUST_BE_UUID);
+
+    const classData = await this.repo.getClassByField({ field: 'id', value: id });
+    if (!classData) throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
+
+    const isOwner = classData.tutorId === userId;
+    const canAccess =
+      isOwner ||
+      (await this.repo.isEnrolled({ userId, classId: id })) ||
+      (await this.repo.isParentOfEnrolled({ userId, classId: id }));
+    if (!canAccess) throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
+
+    return { classData, isOwner };
+  }
+
   // detail read: class owner (tutor), an enrolled student, or a parent of an enrolled student —
   // same access rule as getClassWatchService. Anyone else gets NotFound (not Forbidden).
   async getClassService({ userId, id }: { userId: string; id: string }) {
@@ -234,15 +255,7 @@ export class ClassService {
   // list a class's learning materials (theory + exercise files) resolved through its curriculum.
   // Returns lessons each carrying theoryUrls/exerciseUrls so the FE can render either list.
   async getClassMaterialsService({ userId, id }: { userId: string; id: string }) {
-    if (!userId || (userId && !checkUuidValid({ data: userId })))
-      throw new BadRequestException(ERROR_MESSAGES.USER_ID_MUST_BE_UUID);
-    if (!id || !checkUuidValid({ data: id }))
-      throw new BadRequestException(ERROR_MESSAGES.CLASS_ID_MUST_BE_UUID);
-
-    if (!(await this.user.userExists(userId)))
-      throw new NotFoundException(ERROR_MESSAGES.USER_NOT_EXIST);
-    const classData = await this.repo.getClassByField({ field: 'id', value: id });
-    if (!classData) throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
+    const { classData } = await this.loadAccessibleClass({ userId, id });
 
     const classSummary = {
       id: classData.id,
@@ -266,20 +279,7 @@ export class ClassService {
   // schedule + roster in one call. Access: class owner (tutor), an enrolled student, or a
   // parent of an enrolled student — same rule as SessionService.getSessionService.
   async getClassWatchService({ userId, id }: { userId: string; id: string }) {
-    if (!userId || !checkUuidValid({ data: userId }))
-      throw new BadRequestException(ERROR_MESSAGES.USER_ID_MUST_BE_UUID);
-    if (!id || !checkUuidValid({ data: id }))
-      throw new BadRequestException(ERROR_MESSAGES.CLASS_ID_MUST_BE_UUID);
-
-    const classData = await this.repo.getClassByField({ field: 'id', value: id });
-    if (!classData) throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
-
-    const isOwner = classData.tutorId === userId;
-    const canAccess =
-      isOwner ||
-      (await this.repo.isEnrolled({ userId, classId: id })) ||
-      (await this.repo.isParentOfEnrolled({ userId, classId: id }));
-    if (!canAccess) throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
+    const { classData, isOwner } = await this.loadAccessibleClass({ userId, id });
 
     const [students, schedules, recentSessionRow] = await Promise.all([
       this.repo.getAllStudent({ id }),
@@ -298,18 +298,7 @@ export class ClassService {
   }
 
   async getAllStudentsService({ userId, id }: { userId: string; id: string }) {
-    if (!userId || (userId && !checkUuidValid({ data: userId })))
-      throw new BadRequestException(ERROR_MESSAGES.USER_ID_MUST_BE_UUID);
-    if (!id || !checkUuidValid({ data: id }))
-      throw new BadRequestException(ERROR_MESSAGES.CLASS_ID_MUST_BE_UUID);
-
-    if (!(await this.user.userExists(userId)))
-      throw new NotFoundException(ERROR_MESSAGES.USER_NOT_EXIST);
-    const classData = await this.repo.getClassByField({ field: 'id', value: id });
-    if (!classData || classData.id !== id)
-      throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
-
-    const result = await this.repo.getAllStudent({ id });
-    return result;
+    await this.loadAccessibleClass({ userId, id });
+    return this.repo.getAllStudent({ id });
   }
 }
