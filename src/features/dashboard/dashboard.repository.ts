@@ -1,5 +1,16 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, countDistinct, eq, gte, gt, inArray, lte, sql } from 'drizzle-orm';
+import {
+  and,
+  countDistinct,
+  eq,
+  gte,
+  gt,
+  inArray,
+  lt,
+  lte,
+  sql,
+  type AnyColumn,
+} from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { DRIZZLE } from '../../database/database.module';
 import { classStudents, classes, sessions, tuitions } from '@tutor/gateway/schema';
@@ -23,6 +34,30 @@ export interface MonthlyRow {
   newClasses: number;
   cumulativeRevenue: number;
 }
+
+type RawScheduleRow = Omit<TodayScheduleRow, 'startAt' | 'endAt'> & {
+  startAt: Date | string;
+  endAt: Date | string;
+};
+
+const toIso = (v: Date | string) => (v instanceof Date ? v.toISOString() : String(v));
+
+const toScheduleRow = (r: RawScheduleRow): TodayScheduleRow => ({
+  id: r.id,
+  startAt: toIso(r.startAt),
+  endAt: toIso(r.endAt),
+  title: r.title,
+  className: r.className,
+  subject: r.subject,
+  format: r.format,
+  location: r.location,
+});
+
+/** [Jan 1, next Jan 1) bounds on a column — lets Postgres use an index, unlike extract(year). */
+const yearRange = (column: AnyColumn, year: number) => [
+  gte(column, new Date(year, 0, 1)),
+  lt(column, new Date(year + 1, 0, 1)),
+];
 
 @Injectable()
 export class DashboardRepository {
@@ -107,16 +142,7 @@ export class DashboardRepository {
       )
       .orderBy(sessions.startAt);
 
-    return rows.map((r) => ({
-      id: r.id,
-      startAt: r.startAt instanceof Date ? r.startAt.toISOString() : String(r.startAt),
-      endAt: r.endAt instanceof Date ? r.endAt.toISOString() : String(r.endAt),
-      title: r.title,
-      className: r.className,
-      subject: r.subject,
-      format: r.format,
-      location: r.location,
-    }));
+    return rows.map(toScheduleRow);
   }
 
   /**
@@ -179,16 +205,7 @@ export class DashboardRepository {
       .orderBy(sessions.startAt)
       .limit(limit);
 
-    return rows.map((r) => ({
-      id: r.id,
-      startAt: r.startAt instanceof Date ? r.startAt.toISOString() : String(r.startAt),
-      endAt: r.endAt instanceof Date ? r.endAt.toISOString() : String(r.endAt),
-      title: r.title,
-      className: r.className,
-      subject: r.subject,
-      format: r.format,
-      location: r.location,
-    }));
+    return rows.map(toScheduleRow);
   }
 
   /** Per-month newly enrolled students (class_students.createdAt) for a year. */
@@ -202,10 +219,7 @@ export class DashboardRepository {
       })
       .from(classStudents)
       .where(
-        and(
-          inArray(classStudents.classId, classIds),
-          sql`extract(year from ${classStudents.createdAt}) = ${year}`,
-        ),
+        and(inArray(classStudents.classId, classIds), ...yearRange(classStudents.createdAt, year)),
       )
       .groupBy(sql`extract(month from ${classStudents.createdAt})`);
     for (const r of rows) map.set(Number(r.month), Number(r.total));
@@ -222,9 +236,7 @@ export class DashboardRepository {
         total: sql<number>`count(*)::int`,
       })
       .from(classes)
-      .where(
-        and(inArray(classes.id, classIds), sql`extract(year from ${classes.createdAt}) = ${year}`),
-      )
+      .where(and(inArray(classes.id, classIds), ...yearRange(classes.createdAt, year)))
       .groupBy(sql`extract(month from ${classes.createdAt})`);
     for (const r of rows) map.set(Number(r.month), Number(r.total));
     return map;
@@ -280,7 +292,7 @@ export class DashboardRepository {
         and(
           inArray(tuitions.classId, classIds),
           eq(tuitions.status, 'PAID'),
-          sql`extract(year from ${tuitions.paidDate}) = ${year}`,
+          ...yearRange(tuitions.paidDate, year),
         ),
       )
       .groupBy(sql`extract(month from ${tuitions.paidDate})`);
@@ -298,12 +310,7 @@ export class DashboardRepository {
         total: sql<number>`count(*)::int`,
       })
       .from(sessions)
-      .where(
-        and(
-          inArray(sessions.classId, classIds),
-          sql`extract(year from ${sessions.startAt}) = ${year}`,
-        ),
-      )
+      .where(and(inArray(sessions.classId, classIds), ...yearRange(sessions.startAt, year)))
       .groupBy(sql`extract(month from ${sessions.startAt})`);
     for (const r of rows) map.set(Number(r.month), Number(r.total));
     return map;

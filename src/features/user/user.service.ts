@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { DRIZZLE } from '../../database/database.module';
 import { users } from '@tutor/gateway/schema';
@@ -35,5 +35,14 @@ export class UserService {
     const column = USER_FIELD_COLUMN_MAP[field];
     if (!column) return [];
     return this.db.select().from(users).where(eq(column, value));
+  }
+
+  /** Bulk id → role lookup in one query (avoids a per-id round trip when validating lists). */
+  async getUserRolesByIds(ids: string[]) {
+    if (ids.length === 0) return [];
+    return this.db
+      .select({ id: users.id, role: users.role })
+      .from(users)
+      .where(inArray(users.id, ids));
   }
 }

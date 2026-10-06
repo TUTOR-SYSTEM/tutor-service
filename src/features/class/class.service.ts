@@ -45,6 +45,18 @@ export class ClassService {
     return newCode;
   }
 
+  // one query for the whole id list (was one query per id); same errors, same order
+  private async assertAllStudents(ids: string[]) {
+    const rows = await this.user.getUserRolesByIds(ids);
+    const roleById = new Map(rows.map((r) => [r.id, r.role]));
+    for (const id of ids) {
+      if (!roleById.has(id))
+        throw new BadRequestException(`${ERROR_MESSAGES.STUDENT_NOT_FOUND}: ${id}`);
+      if (roleById.get(id) !== 'STUDENT')
+        throw new BadRequestException(`${ERROR_MESSAGES.USER_NOT_A_STUDENT}: ${id}`);
+    }
+  }
+
   async createClassService({ userId, data }: { userId: string; data: CreateClassDto }) {
     const { name, code, tutorId } = data;
     if (!userId || (userId && !checkUuidValid({ data: userId }))) {
@@ -111,14 +123,7 @@ export class ClassService {
 
     if (studentIds) {
       const uniqueIds = [...new Set(studentIds)];
-      for (const studentId of uniqueIds) {
-        const found = await this.user.getUserByField({ field: 'id', value: studentId });
-        const student = Array.isArray(found) ? found[0] : found;
-        if (!student)
-          throw new BadRequestException(`${ERROR_MESSAGES.STUDENT_NOT_FOUND}: ${studentId}`);
-        if (student.role !== 'STUDENT')
-          throw new BadRequestException(`${ERROR_MESSAGES.USER_NOT_A_STUDENT}: ${studentId}`);
-      }
+      await this.assertAllStudents(uniqueIds);
       await this.repo.syncStudents({ classId: id, studentIds: uniqueIds });
     }
 
@@ -181,14 +186,7 @@ export class ClassService {
 
     // dedupe input, then verify every id references an existing STUDENT user
     const studentIds = [...new Set(data.studentIds)];
-    for (const studentId of studentIds) {
-      const found = await this.user.getUserByField({ field: 'id', value: studentId });
-      const student = Array.isArray(found) ? found[0] : found;
-      if (!student)
-        throw new BadRequestException(`${ERROR_MESSAGES.STUDENT_NOT_FOUND}: ${studentId}`);
-      if (student.role !== 'STUDENT')
-        throw new BadRequestException(`${ERROR_MESSAGES.USER_NOT_A_STUDENT}: ${studentId}`);
-    }
+    await this.assertAllStudents(studentIds);
 
     const inserted = await this.repo.addStudents({ classId, studentIds });
     const addedIds = inserted.map((row) => row.studentId);
