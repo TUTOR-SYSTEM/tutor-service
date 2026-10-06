@@ -37,6 +37,26 @@ export class UserService {
     return this.db.select().from(users).where(eq(column, value));
   }
 
+  /** Cheap existence check (id only) — use instead of getUserByField when the row isn't needed. */
+  async userExists(id: string): Promise<boolean> {
+    const [row] = await this.db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.id, id))
+      .limit(1);
+    return !!row;
+  }
+
+  /** Role of one user, or null when the user doesn't exist (selects 2 columns, not the row). */
+  async getUserRoleById(id: string) {
+    const [row] = await this.db
+      .select({ id: users.id, role: users.role })
+      .from(users)
+      .where(eq(users.id, id))
+      .limit(1);
+    return row ?? null;
+  }
+
   /** Bulk id → role lookup in one query (avoids a per-id round trip when validating lists). */
   async getUserRolesByIds(ids: string[]) {
     if (ids.length === 0) return [];

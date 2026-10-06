@@ -40,8 +40,8 @@ export class SessionService {
     // the acting tutor owns the class, so default the session tutor to them; if an explicit
     // tutorId is supplied, it must reference a real user.
     if (tutorId && tutorId !== userId) {
-      const tutor = await this.userService.getUserByField({ field: 'id', value: tutorId });
-      if (!tutor || tutor.length === 0) throw new NotFoundException(ERROR_MESSAGES.TUTOR_NOT_FOUND);
+      if (!(await this.userService.userExists(tutorId)))
+        throw new NotFoundException(ERROR_MESSAGES.TUTOR_NOT_FOUND);
     }
 
     return { lessonId: lessonId ?? null, tutorId: tutorId ?? userId };

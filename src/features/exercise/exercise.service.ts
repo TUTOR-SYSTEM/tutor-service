@@ -36,8 +36,7 @@ export class ExerciseService {
   }
 
   private async assertUserExists(id: string, label: string) {
-    const user = await this.userService.getUserByField({ field: 'id', value: id });
-    if (!user || (Array.isArray(user) && user.length === 0)) {
+    if (!(await this.userService.userExists(id))) {
       throw new NotFoundException(`${ERROR_MESSAGES.USER_NOT_FOUND}: ${label}`);
     }
   }
@@ -72,8 +71,10 @@ export class ExerciseService {
       throw new ForbiddenException(ERROR_MESSAGES.EXERCISE_SUBMIT_NOT_ALLOWED);
     }
 
-    await this.assertUserExists(data.tutorId, 'Tutor');
-    await this.assertUserExists(data.studentId, 'Student');
+    await Promise.all([
+      this.assertUserExists(data.tutorId, 'Tutor'),
+      this.assertUserExists(data.studentId, 'Student'),
+    ]);
     await this.resolveRefs({ userId, sessionId: data.sessionId, lessonId: data.lessonId });
 
     // one submission per (student, session) — resubmits go through the submit endpoint

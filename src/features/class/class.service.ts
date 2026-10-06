@@ -5,9 +5,6 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { DRIZZLE } from '../../database/database.module';
-import { Inject } from '@nestjs/common';
-import { drizzle } from 'drizzle-orm/postgres-js';
 import { ClassRepository } from './class.repository';
 import {
   AddStudentsDto,
@@ -24,8 +21,6 @@ export class ClassService {
   private readonly logger = new Logger(ClassService.name);
   constructor(
     private readonly repo: ClassRepository,
-    @Inject(DRIZZLE)
-    private readonly db: ReturnType<typeof drizzle>,
     private readonly user: UserService,
   ) {}
 
@@ -57,36 +52,43 @@ export class ClassService {
     }
   }
 
+  // postgres unique_violation (drizzle may wrap the driver error in `cause`)
+  private isUniqueViolation(err: unknown): boolean {
+    const e = err as { code?: string; cause?: { code?: string } };
+    return e?.code === '23505' || e?.cause?.code === '23505';
+  }
+
   async createClassService({ userId, data }: { userId: string; data: CreateClassDto }) {
     const { name, code, tutorId } = data;
     if (!userId || (userId && !checkUuidValid({ data: userId }))) {
       throw new BadRequestException(ERROR_MESSAGES.USER_ID_MUST_BE_UUID);
     }
-    const user = await this.user.getUserByField({
-      field: 'id',
-      value: userId,
-    });
-    if (!user || (Array.isArray(user) && user.length === 0)) {
+    if (!(await this.user.userExists(userId)))
       throw new BadRequestException(ERROR_MESSAGES.USER_NOT_FOUND);
-    }
-
-    const nameExtst = await this.repo.getClassByField({ field: 'name', value: name });
-    if (nameExtst) throw new BadRequestException(ERROR_MESSAGES.CLASS_NAME_EXISTS);
-
-    const codeExtst = await this.repo.getClassByField({ field: 'code', value: code });
-    if (codeExtst) throw new BadRequestException(ERROR_MESSAGES.CLASS_CODE_EXISTS);
-
-    if (!tutorId || (tutorId && !checkUuidValid({ data: tutorId }))) {
+    if (!tutorId || !checkUuidValid({ data: tutorId })) {
       throw new BadRequestException(ERROR_MESSAGES.TUTOR_ID_MUST_BE_UUID);
     }
-    const tutor = await this.user.getUserByField({
-      field: 'id',
-      value: tutorId,
-    });
-    if (!tutor || (Array.isArray(tutor) && tutor.length === 0)) {
-      throw new BadRequestException(ERROR_MESSAGES.TUTOR_NOT_FOUND);
+    const [nameExists, codeExists, tutorExists] = await Promise.all([
+      this.repo.getClassByField({ field: 'name', value: name }),
+      this.repo.getClassByField({ field: 'code', value: code }),
+      this.user.userExists(tutorId),
+    ]);
+    if (nameExists) throw new BadRequestException(ERROR_MESSAGES.CLASS_NAME_EXISTS);
+    if (codeExists) throw new BadRequestException(ERROR_MESSAGES.CLASS_CODE_EXISTS);
+    if (!tutorExists) throw new BadRequestException(ERROR_MESSAGES.TUTOR_NOT_FOUND);
+
+    try {
+      return await this.repo.create({ data });
+    } catch (err) {
+      // lost a race with a concurrent create: the unique index is the source of truth
+      if (this.isUniqueViolation(err)) {
+        const byName = await this.repo.getClassByField({ field: 'name', value: name });
+        throw new BadRequestException(
+          byName ? ERROR_MESSAGES.CLASS_NAME_EXISTS : ERROR_MESSAGES.CLASS_CODE_EXISTS,
+        );
+      }
+      throw err;
     }
-    return await this.repo.create({ data });
   }
 
   async updateClassService({
@@ -135,17 +137,11 @@ export class ClassService {
     if (!userId || (userId && !checkUuidValid({ data: userId })))
       throw new BadRequestException(ERROR_MESSAGES.USER_ID_MUST_BE_UUID);
 
-    const user = await this.user.getUserByField({
-      field: 'id',
-      value: userId,
-    });
-    if (!user || (Array.isArray(user) && user.length === 0))
-      throw new NotFoundException(ERROR_MESSAGES.USER_NOT_EXIST);
-
-    const acting = Array.isArray(user) ? user[0] : user;
+    const acting = await this.user.getUserRoleById(userId);
+    if (!acting) throw new NotFoundException(ERROR_MESSAGES.USER_NOT_EXIST);
     return await this.repo.getClasses({
       userId,
-      role: acting?.role ?? undefined,
+      role: acting.role ?? undefined,
       query: { ...query },
     });
   }
@@ -155,11 +151,7 @@ export class ClassService {
     if (!userId || (userId && !checkUuidValid({ data: userId })))
       throw new BadRequestException(ERROR_MESSAGES.USER_ID_MUST_BE_UUID);
 
-    const user = await this.user.getUserByField({
-      field: 'id',
-      value: userId,
-    });
-    if (!user || (Array.isArray(user) && user.length === 0))
+    if (!(await this.user.userExists(userId)))
       throw new NotFoundException(ERROR_MESSAGES.USER_NOT_EXIST);
     return this.repo.getClass({ id });
   }
@@ -205,13 +197,8 @@ export class ClassService {
     if (!id || !checkUuidValid({ data: id }))
       throw new BadRequestException(ERROR_MESSAGES.CLASS_ID_MUST_BE_UUID);
 
-    const user = await this.user.getUserByField({
-      field: 'id',
-      value: userId,
-    });
-    if (!user || (Array.isArray(user) && user.length === 0))
+    if (!(await this.user.userExists(userId)))
       throw new NotFoundException(ERROR_MESSAGES.USER_NOT_EXIST);
-
     const classData = await this.repo.getClassByField({ field: 'id', value: id });
     if (!classData) throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
     if (classData.tutorId !== userId) throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
@@ -230,13 +217,8 @@ export class ClassService {
     if (!id || !checkUuidValid({ data: id }))
       throw new BadRequestException(ERROR_MESSAGES.CLASS_ID_MUST_BE_UUID);
 
-    const user = await this.user.getUserByField({
-      field: 'id',
-      value: userId,
-    });
-    if (!user || (Array.isArray(user) && user.length === 0))
+    if (!(await this.user.userExists(userId)))
       throw new NotFoundException(ERROR_MESSAGES.USER_NOT_EXIST);
-
     const classData = await this.repo.getClassByField({ field: 'id', value: id });
     if (!classData) throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
 
@@ -299,11 +281,7 @@ export class ClassService {
     if (!id || !checkUuidValid({ data: id }))
       throw new BadRequestException(ERROR_MESSAGES.CLASS_ID_MUST_BE_UUID);
 
-    const user = await this.user.getUserByField({
-      field: 'id',
-      value: userId,
-    });
-    if (!user || (Array.isArray(user) && user.length === 0))
+    if (!(await this.user.userExists(userId)))
       throw new NotFoundException(ERROR_MESSAGES.USER_NOT_EXIST);
     const classData = await this.repo.getClassByField({ field: 'id', value: id });
     if (!classData || classData.id !== id)
