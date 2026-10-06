@@ -1,7 +1,7 @@
 import { Inject, Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { DRIZZLE } from '../../database/database.module';
 import { type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import { eq, and, desc, sql } from 'drizzle-orm';
+import { eq, and, desc, inArray, sql } from 'drizzle-orm';
 import {
   conversations,
   conversationParticipants,
@@ -26,14 +26,6 @@ export class ConversationService {
   constructor(@Inject(DRIZZLE) private readonly db: PostgresJsDatabase<Record<string, never>>) {}
 
   async getConversations(userId: string) {
-    const participantRows = await this.db
-      .select({ conversationId: conversationParticipants.conversationId })
-      .from(conversationParticipants)
-      .where(eq(conversationParticipants.userId, userId));
-
-    const convIds = participantRows.map((r) => r.conversationId);
-    if (convIds.length === 0) return [];
-
     const convList = await this.db
       .select({
         id: conversations.id,
@@ -45,25 +37,49 @@ export class ConversationService {
         createdAt: conversations.createdAt,
       })
       .from(conversations)
-      .where(sql`${conversations.id} IN ${convIds}`)
+      .where(
+        inArray(
+          conversations.id,
+          this.db
+            .select({ id: conversationParticipants.conversationId })
+            .from(conversationParticipants)
+            .where(eq(conversationParticipants.userId, userId)),
+        ),
+      )
       .orderBy(desc(conversations.lastMessageAt));
 
-    const result = await Promise.all(
-      convList.map(async (conv) => {
-        const participants = await this.getParticipantDetails(conv.id);
-        const lastMessage = await this.getLastMessage(conv.id);
-        const unreadCount = await this.getUnreadCount(conv.id, userId);
+    if (convList.length === 0) return [];
+    const convIds = convList.map((c) => c.id);
 
-        return {
-          ...conv,
-          participants,
-          lastMessage,
-          unreadCount,
-        };
-      }),
-    );
+    // one query per child type for the whole page of conversations (no per-row round trips)
+    const [participantRows, lastMessageRows, unreadRows] = await Promise.all([
+      this.getParticipantDetailsMany(convIds),
+      this.getLastMessages(convIds),
+      this.getUnreadCountsFor(userId, convIds),
+    ]);
 
-    return result;
+    const participantsByConv = new Map<string, typeof participantRows>();
+    for (const row of participantRows) {
+      const list = participantsByConv.get(row.conversationId) ?? [];
+      list.push(row);
+      participantsByConv.set(row.conversationId, list);
+    }
+    const lastMessageByConv = new Map(lastMessageRows.map((m) => [m.conversationId, m]));
+    const unreadByConv = new Map(unreadRows.map((u) => [u.conversationId, Number(u.count)]));
+
+    return convList.map((conv) => ({
+      ...conv,
+      participants: (participantsByConv.get(conv.id) ?? []).map((p) => ({
+        userId: p.userId,
+        firstName: p.firstName,
+        lastName: p.lastName,
+        avatar: p.avatar,
+        role: p.role,
+        joinedAt: p.joinedAt,
+      })),
+      lastMessage: this.pickLastMessage(lastMessageByConv.get(conv.id)),
+      unreadCount: unreadByConv.get(conv.id) ?? 0,
+    }));
   }
 
   async getConversationById(conversationId: string, userId: string) {
@@ -269,32 +285,95 @@ export class ConversationService {
   }
 
   private async findDirectConversation(userId1: string, userId2: string) {
-    const user1Convs = await this.db
-      .select({ conversationId: conversationParticipants.conversationId })
+    const memberOf = (userId: string) =>
+      this.db
+        .select({ id: conversationParticipants.conversationId })
+        .from(conversationParticipants)
+        .where(eq(conversationParticipants.userId, userId));
+
+    const [conv] = await this.db
+      .select()
+      .from(conversations)
+      .where(
+        and(
+          eq(conversations.type, 'DIRECT'),
+          inArray(conversations.id, memberOf(userId1)),
+          inArray(conversations.id, memberOf(userId2)),
+        ),
+      )
+      .limit(1);
+
+    return conv ?? null;
+  }
+
+  private pickLastMessage(
+    m: Awaited<ReturnType<ConversationService['getLastMessages']>>[number] | undefined,
+  ) {
+    if (!m) return null;
+    return {
+      id: m.id,
+      senderId: m.senderId,
+      content: m.content,
+      status: m.status,
+      createdAt: m.createdAt,
+    };
+  }
+
+  private async getParticipantDetailsMany(conversationIds: string[]) {
+    return this.db
+      .select({
+        conversationId: conversationParticipants.conversationId,
+        userId: conversationParticipants.userId,
+        firstName: users.firstName,
+        lastName: users.lastName,
+        avatar: users.avatar,
+        role: users.role,
+        joinedAt: conversationParticipants.joinedAt,
+      })
       .from(conversationParticipants)
-      .where(eq(conversationParticipants.userId, userId1));
+      .innerJoin(users, eq(conversationParticipants.userId, users.id))
+      .where(inArray(conversationParticipants.conversationId, conversationIds));
+  }
 
-    const user2Convs = await this.db
-      .select({ conversationId: conversationParticipants.conversationId })
-      .from(conversationParticipants)
-      .where(eq(conversationParticipants.userId, userId2));
+  // newest message per conversation in one DISTINCT ON query
+  private async getLastMessages(conversationIds: string[]) {
+    return this.db
+      .selectDistinctOn([messages.conversationId], {
+        conversationId: messages.conversationId,
+        id: messages.id,
+        senderId: messages.senderId,
+        content: messages.content,
+        status: messages.status,
+        createdAt: messages.createdAt,
+      })
+      .from(messages)
+      .where(inArray(messages.conversationId, conversationIds))
+      .orderBy(messages.conversationId, desc(messages.createdAt));
+  }
 
-    const user1Ids = new Set(user1Convs.map((r) => r.conversationId));
-    const commonIds = user2Convs.map((r) => r.conversationId).filter((id) => user1Ids.has(id));
-
-    if (commonIds.length === 0) return null;
-
-    for (const convId of commonIds) {
-      const conv = await this.db
-        .select()
-        .from(conversations)
-        .where(and(eq(conversations.id, convId), eq(conversations.type, 'DIRECT')))
-        .limit(1);
-
-      if (conv.length > 0) return conv[0];
-    }
-
-    return null;
+  // unread = messages from others newer than the user's lastReadAt (all of them if never read)
+  private async getUnreadCountsFor(userId: string, conversationIds: string[]) {
+    return this.db
+      .select({
+        conversationId: messages.conversationId,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(messages)
+      .innerJoin(
+        conversationParticipants,
+        and(
+          eq(conversationParticipants.conversationId, messages.conversationId),
+          eq(conversationParticipants.userId, userId),
+        ),
+      )
+      .where(
+        and(
+          inArray(messages.conversationId, conversationIds),
+          sql`${messages.senderId} != ${userId}`,
+          sql`(${conversationParticipants.lastReadAt} is null or ${messages.createdAt} > ${conversationParticipants.lastReadAt})`,
+        ),
+      )
+      .groupBy(messages.conversationId);
   }
 
   private async getParticipantDetails(conversationId: string) {
@@ -329,41 +408,6 @@ export class ConversationService {
       .limit(1);
 
     return rows[0] ?? null;
-  }
-
-  private async getUnreadCount(conversationId: string, userId: string) {
-    const participant = await this.db
-      .select({ lastReadAt: conversationParticipants.lastReadAt })
-      .from(conversationParticipants)
-      .where(
-        and(
-          eq(conversationParticipants.conversationId, conversationId),
-          eq(conversationParticipants.userId, userId),
-        ),
-      )
-      .limit(1);
-
-    if (participant.length === 0 || !participant[0].lastReadAt) {
-      const total = await this.db
-        .select({ count: sql<number>`count(*)::int` })
-        .from(messages)
-        .where(eq(messages.conversationId, conversationId));
-
-      return total[0]?.count ?? 0;
-    }
-
-    const count = await this.db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(messages)
-      .where(
-        and(
-          eq(messages.conversationId, conversationId),
-          sql`${messages.createdAt} > ${participant[0].lastReadAt.toISOString()}`,
-          sql`${messages.senderId} != ${userId}`,
-        ),
-      );
-
-    return count[0]?.count ?? 0;
   }
 
   private async validateChatPermission(

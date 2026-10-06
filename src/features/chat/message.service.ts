@@ -123,47 +123,26 @@ export class MessageService {
   }
 
   async getUnreadCounts(userId: string) {
-    const participantRows = await this.db
+    // one grouped query across all of the user's conversations (was 1+N)
+    const rows = await this.db
       .select({
         conversationId: conversationParticipants.conversationId,
-        lastReadAt: conversationParticipants.lastReadAt,
+        count: sql<number>`count(${messages.id})::int`,
       })
       .from(conversationParticipants)
-      .where(eq(conversationParticipants.userId, userId));
+      .leftJoin(
+        messages,
+        and(
+          eq(messages.conversationId, conversationParticipants.conversationId),
+          sql`${messages.senderId} != ${userId}`,
+          sql`(${conversationParticipants.lastReadAt} is null or ${messages.createdAt} > ${conversationParticipants.lastReadAt})`,
+        ),
+      )
+      .where(eq(conversationParticipants.userId, userId))
+      .groupBy(conversationParticipants.conversationId);
 
     const result: Record<string, number> = {};
-
-    for (const p of participantRows) {
-      let count: number;
-
-      if (!p.lastReadAt) {
-        const total = await this.db
-          .select({ count: sql<number>`count(*)::int` })
-          .from(messages)
-          .where(
-            and(
-              eq(messages.conversationId, p.conversationId),
-              sql`${messages.senderId} != ${userId}`,
-            ),
-          );
-        count = total[0]?.count ?? 0;
-      } else {
-        const unread = await this.db
-          .select({ count: sql<number>`count(*)::int` })
-          .from(messages)
-          .where(
-            and(
-              eq(messages.conversationId, p.conversationId),
-              sql`${messages.createdAt} > ${p.lastReadAt.toISOString()}`,
-              sql`${messages.senderId} != ${userId}`,
-            ),
-          );
-        count = unread[0]?.count ?? 0;
-      }
-
-      result[p.conversationId] = count;
-    }
-
+    for (const r of rows) result[r.conversationId] = Number(r.count);
     return result;
   }
 }
