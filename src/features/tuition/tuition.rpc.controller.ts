@@ -22,18 +22,18 @@ export class TuitionRpcController {
   }
 
   @MessagePattern('tuition.getAll')
-  getAll(@Payload() query: GetTuitionsQueryDto) {
-    return this.tuitionService.findAll(query);
+  getAll(@Payload() payload: { userId: string; query: GetTuitionsQueryDto }) {
+    return this.tuitionService.findAll(payload);
   }
 
   @MessagePattern('tuition.getSummary')
-  getSummary(@Payload() classId?: string) {
-    return this.tuitionService.getSummary(classId);
+  getSummary(@Payload() payload: { userId: string; classId?: string }) {
+    return this.tuitionService.getSummary(payload);
   }
 
   @MessagePattern('tuition.getById')
-  getById(@Payload() id: string) {
-    return this.tuitionService.findById(id);
+  getById(@Payload() payload: { userId: string; id: string }) {
+    return this.tuitionService.findById(payload);
   }
 
   @MessagePattern('tuition.update')

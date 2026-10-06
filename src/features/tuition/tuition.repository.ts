@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, count, desc, eq, type SQL, sum } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, or, type SQL, sum } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { DRIZZLE } from '../../database/database.module';
 import { classes, tuitions, users } from '@tutor/gateway/schema';
@@ -22,6 +22,19 @@ export class TuitionRepository {
     studentPhone: users.phone,
     studentAvatar: users.avatar,
   };
+
+  /** Class ids owned by the tutor (subquery — no id round trip). */
+  private ownedClassIds(userId: string) {
+    return this.db.select({ id: classes.id }).from(classes).where(eq(classes.tutorId, userId));
+  }
+
+  /** A user may read a tuition if they are its student or the tutor of its class. */
+  private canRead(userId: string) {
+    return or(
+      eq(tuitions.studentId, userId),
+      inArray(tuitions.classId, this.ownedClassIds(userId)),
+    );
+  }
 
   private serialize(r: {
     tuition: typeof tuitions.$inferSelect;
@@ -64,9 +77,11 @@ export class TuitionRepository {
     return this.findById(tuition.id);
   }
 
-  async findAll(query: GetTuitionsQueryDto) {
+  async findAll({ userId, query }: { userId: string; query: GetTuitionsQueryDto }) {
     const { page, limit, classId, studentId, status } = query;
     const conditions: SQL[] = [];
+    const access = this.canRead(userId);
+    if (access) conditions.push(access);
 
     if (classId) conditions.push(eq(tuitions.classId, classId));
     if (studentId) conditions.push(eq(tuitions.studentId, studentId));
@@ -94,13 +109,14 @@ export class TuitionRepository {
     };
   }
 
-  async findById(id: string) {
+  /** When `userId` is given the row is only returned if that user may read it. */
+  async findById(id: string, userId?: string) {
     const [row] = await this.db
       .select(this.joinedColumns)
       .from(tuitions)
       .innerJoin(classes, eq(tuitions.classId, classes.id))
       .innerJoin(users, eq(tuitions.studentId, users.id))
-      .where(eq(tuitions.id, id))
+      .where(and(eq(tuitions.id, id), userId ? this.canRead(userId) : undefined))
       .limit(1);
     return row ? this.serialize(row) : null;
   }
@@ -141,8 +157,12 @@ export class TuitionRepository {
     return row ?? null;
   }
 
-  async getSummary(classId?: string) {
-    const where = classId ? eq(tuitions.classId, classId) : undefined;
+  /** Revenue summary over the classes the tutor owns (optionally narrowed to one class). */
+  async getSummary({ userId, classId }: { userId: string; classId?: string }) {
+    const where = and(
+      inArray(tuitions.classId, this.ownedClassIds(userId)),
+      classId ? eq(tuitions.classId, classId) : undefined,
+    );
 
     // one grouped scan instead of three sequential sum() queries
     const rows = await this.db

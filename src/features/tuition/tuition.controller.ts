@@ -66,8 +66,9 @@ export class TuitionController {
   async findAll(
     @Query(new ZodValidationPipe<GetTuitionsQueryDto>(getTuitionsQuerySchema))
     query: GetTuitionsQueryDto,
+    @CurrentUser() user: Record<string, string>,
   ) {
-    return this.tuitionService.findAll(query);
+    return this.tuitionService.findAll({ userId: user.id, query });
   }
 
   @Get('summary')
@@ -78,8 +79,11 @@ export class TuitionController {
   })
   @ApiQuery({ name: 'classId', required: false, type: String, format: 'uuid' })
   @SwaggerResponse({ status: 200, description: 'Summary fetched' })
-  async getSummary(@Query('classId') classId?: string) {
-    return this.tuitionService.getSummary(classId);
+  async getSummary(
+    @CurrentUser() user: Record<string, string>,
+    @Query('classId') classId?: string,
+  ) {
+    return this.tuitionService.getSummary({ userId: user.id, classId });
   }
 
   @Get(':id')
@@ -87,8 +91,8 @@ export class TuitionController {
   @ApiOperation({ summary: 'Get tuition detail' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
   @SwaggerResponse({ status: 200, description: 'Tuition detail' })
-  async findById(@Param('id') id: string) {
-    return this.tuitionService.findById(id);
+  async findById(@Param('id') id: string, @CurrentUser() user: Record<string, string>) {
+    return this.tuitionService.findById({ userId: user.id, id });
   }
 
   @Put(':id')
