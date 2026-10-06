@@ -158,13 +158,24 @@ export class ClassService {
   }
 
   //todo : get detail class service ...
+  // detail read: class owner (tutor), an enrolled student, or a parent of an enrolled student —
+  // same access rule as getClassWatchService. Anyone else gets NotFound (not Forbidden).
   async getClassService({ userId, id }: { userId: string; id: string }) {
-    if (!userId || (userId && !checkUuidValid({ data: userId })))
+    if (!userId || !checkUuidValid({ data: userId }))
       throw new BadRequestException(ERROR_MESSAGES.USER_ID_MUST_BE_UUID);
+    if (!id || !checkUuidValid({ data: id }))
+      throw new BadRequestException(ERROR_MESSAGES.CLASS_ID_MUST_BE_UUID);
 
-    if (!(await this.user.userExists(userId)))
-      throw new NotFoundException(ERROR_MESSAGES.USER_NOT_EXIST);
-    return this.repo.getClass({ id });
+    const classData = await this.repo.getClass({ id });
+    if (!classData) throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
+
+    const canAccess =
+      classData.tutorId === userId ||
+      (await this.repo.isEnrolled({ userId, classId: id })) ||
+      (await this.repo.isParentOfEnrolled({ userId, classId: id }));
+    if (!canAccess) throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
+
+    return classData;
   }
 
   // add one student (studentIds of length 1) or bulk students into a single class
