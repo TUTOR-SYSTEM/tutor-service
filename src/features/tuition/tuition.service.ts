@@ -1,10 +1,5 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ERROR_MESSAGES } from 'src/data/constants';
-import { Inject } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/postgres-js';
-import { DRIZZLE } from '../../database/database.module';
-import { classes } from '@tutor/gateway/schema';
 import type {
   CreateTuitionDto,
   GetTuitionsQueryDto,
@@ -16,19 +11,14 @@ import { checkUuidValid } from '@packages/helpers';
 @Injectable()
 export class TuitionService {
   private readonly logger = new Logger(TuitionService.name);
-  constructor(
-    private readonly repo: TuitionRepository,
-    @Inject(DRIZZLE)
-    private readonly db: ReturnType<typeof drizzle>,
-  ) {}
+  constructor(private readonly repo: TuitionRepository) {}
 
   async create(dto: CreateTuitionDto, tutorId: string) {
     if (!tutorId || !checkUuidValid({ data: tutorId }))
       throw new BadRequestException(ERROR_MESSAGES.TUTOR_ID_INVALID);
     if (!dto.classId || !checkUuidValid({ data: dto.classId }))
       throw new BadRequestException(ERROR_MESSAGES.CLASS_ID_INVALID);
-    const [cls] = await this.db.select().from(classes).where(eq(classes.id, dto.classId));
-    if (!cls || cls.tutorId !== tutorId) {
+    if ((await this.repo.getClassTutorId(dto.classId)) !== tutorId) {
       throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
     }
     const result = await this.repo.create(dto);
@@ -52,10 +42,9 @@ export class TuitionService {
       throw new BadRequestException(ERROR_MESSAGES.ID_MUST_BE_UUID);
     if (!tutorId || !checkUuidValid({ data: tutorId }))
       throw new BadRequestException(ERROR_MESSAGES.TUTOR_ID_INVALID);
-    const tuition = await this.repo.findById(id);
-    if (!tuition) throw new NotFoundException(ERROR_MESSAGES.TUITION_RECORD_NOT_FOUND);
-    const [cls] = await this.db.select().from(classes).where(eq(classes.id, tuition.classId));
-    if (!cls || cls.tutorId !== tutorId) {
+    const owner = await this.repo.findOwnerById(id);
+    if (!owner) throw new NotFoundException(ERROR_MESSAGES.TUITION_RECORD_NOT_FOUND);
+    if (owner.tutorId !== tutorId) {
       throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
     }
     const updated = await this.repo.update(id, dto);
@@ -67,10 +56,9 @@ export class TuitionService {
       throw new BadRequestException(ERROR_MESSAGES.ID_MUST_BE_UUID);
     if (!tutorId || !checkUuidValid({ data: tutorId }))
       throw new BadRequestException(ERROR_MESSAGES.TUTOR_ID_INVALID);
-    const tuition = await this.repo.findById(id);
-    if (!tuition) throw new NotFoundException(ERROR_MESSAGES.TUITION_RECORD_NOT_FOUND);
-    const [cls] = await this.db.select().from(classes).where(eq(classes.id, tuition.classId));
-    if (!cls || cls.tutorId !== tutorId) {
+    const owner = await this.repo.findOwnerById(id);
+    if (!owner) throw new NotFoundException(ERROR_MESSAGES.TUITION_RECORD_NOT_FOUND);
+    if (owner.tutorId !== tutorId) {
       throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
     }
     await this.repo.delete(id);

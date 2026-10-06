@@ -62,6 +62,8 @@ export class LessonRepository {
       .select()
       .from(lessons)
       .where(whereClause)
+      // stable order — without it OFFSET pagination can repeat/skip rows between pages
+      .orderBy(lessons.order, lessons.id)
       .limit(limitNumber)
       .offset(offset);
 
@@ -77,7 +79,7 @@ export class LessonRepository {
   }
 
   async findById(id: string) {
-    const [lesson] = await this.db.select().from(lessons).where(eq(lessons.id, id));
+    const [lesson] = await this.db.select().from(lessons).where(eq(lessons.id, id)).limit(1);
     return lesson ?? null;
   }
 

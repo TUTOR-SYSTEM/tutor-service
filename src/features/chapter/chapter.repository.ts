@@ -44,6 +44,8 @@ export class ChapterRepository {
       .select()
       .from(chapters)
       .where(whereClause)
+      // stable order — without it OFFSET pagination can repeat/skip rows between pages
+      .orderBy(chapters.order, chapters.id)
       .limit(limitNumber)
       .offset(offset);
 
@@ -59,7 +61,7 @@ export class ChapterRepository {
   }
 
   async findById(id: string) {
-    const [chapter] = await this.db.select().from(chapters).where(eq(chapters.id, id));
+    const [chapter] = await this.db.select().from(chapters).where(eq(chapters.id, id)).limit(1);
     return chapter ?? null;
   }
 

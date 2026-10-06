@@ -100,7 +100,8 @@ export class TuitionRepository {
       .from(tuitions)
       .innerJoin(classes, eq(tuitions.classId, classes.id))
       .innerJoin(users, eq(tuitions.studentId, users.id))
-      .where(eq(tuitions.id, id));
+      .where(eq(tuitions.id, id))
+      .limit(1);
     return row ? this.serialize(row) : null;
   }
 
@@ -119,29 +120,45 @@ export class TuitionRepository {
     return !!tuition;
   }
 
-  async getSummary(classId?: string) {
-    const conditions: SQL[] = [];
-    if (classId) conditions.push(eq(tuitions.classId, classId));
-    const where = conditions.length > 0 ? and(...conditions) : undefined;
+  /** Owning tutor of a class (2 columns, no joins) for ownership checks. */
+  async getClassTutorId(classId: string): Promise<string | null> {
+    const [row] = await this.db
+      .select({ tutorId: classes.tutorId })
+      .from(classes)
+      .where(eq(classes.id, classId))
+      .limit(1);
+    return row?.tutorId ?? null;
+  }
 
-    const [paidRow] = await this.db
-      .select({ total: sum(tuitions.amount) })
+  /** Tuition + its class's tutor in one query, for update/delete ownership checks. */
+  async findOwnerById(id: string): Promise<{ id: string; tutorId: string } | null> {
+    const [row] = await this.db
+      .select({ id: tuitions.id, tutorId: classes.tutorId })
       .from(tuitions)
-      .where(and(where, eq(tuitions.status, 'PAID')));
-    const [unpaidRow] = await this.db
-      .select({ total: sum(tuitions.amount) })
+      .innerJoin(classes, eq(tuitions.classId, classes.id))
+      .where(eq(tuitions.id, id))
+      .limit(1);
+    return row ?? null;
+  }
+
+  async getSummary(classId?: string) {
+    const where = classId ? eq(tuitions.classId, classId) : undefined;
+
+    // one grouped scan instead of three sequential sum() queries
+    const rows = await this.db
+      .select({ status: tuitions.status, total: sum(tuitions.amount) })
       .from(tuitions)
-      .where(and(where, eq(tuitions.status, 'UNPAID')));
-    const [overdueRow] = await this.db
-      .select({ total: sum(tuitions.amount) })
-      .from(tuitions)
-      .where(and(where, eq(tuitions.status, 'OVERDUE')));
+      .where(where)
+      .groupBy(tuitions.status);
+
+    const totalOf = (status: string) => Number(rows.find((r) => r.status === status)?.total ?? 0);
+    const totalPaid = totalOf('PAID');
 
     return {
-      totalPaid: Number(paidRow?.total ?? 0),
-      totalUnpaid: Number(unpaidRow?.total ?? 0),
-      totalOverdue: Number(overdueRow?.total ?? 0),
-      totalRevenue: Number(paidRow?.total ?? 0),
+      totalPaid,
+      totalUnpaid: totalOf('UNPAID'),
+      totalOverdue: totalOf('OVERDUE'),
+      totalRevenue: totalPaid,
     };
   }
 }

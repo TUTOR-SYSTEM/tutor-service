@@ -5,7 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { type CreateCurriculumDto, UpdateCurriculumDto } from '@packages/entities';
 import { chapters, curriculums, lessons } from '@tutor/gateway/schema';
 import { buildListWhereClause } from '@packages/helpers';
-import { asc, count, eq, getTableColumns, sql } from 'drizzle-orm';
+import { asc, count, desc, eq, getTableColumns, sql } from 'drizzle-orm';
 
 @Injectable()
 export class CurriculumRepository {
@@ -64,6 +64,7 @@ export class CurriculumRepository {
       .select({ ...getTableColumns(curriculums) })
       .from(curriculums)
       .where(whereClause)
+      .orderBy(desc(curriculums.createdAt), curriculums.id)
       .limit(limitNumber)
       .offset(offset);
 
