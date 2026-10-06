@@ -146,6 +146,17 @@ export class ClassService {
     });
   }
 
+  // light ownership gate for child resources (schedule/session): one class row, no roster join.
+  // NotFound (not Forbidden) when the class is missing or owned by someone else.
+  async getOwnedClassService({ userId, id }: { userId: string; id: string }) {
+    if (!id || !checkUuidValid({ data: id }))
+      throw new BadRequestException(ERROR_MESSAGES.CLASS_ID_MUST_BE_UUID);
+    const classData = await this.repo.getClassByField({ field: 'id', value: id });
+    if (!classData || classData.tutorId !== userId)
+      throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
+    return classData;
+  }
+
   //todo : get detail class service ...
   async getClassService({ userId, id }: { userId: string; id: string }) {
     if (!userId || (userId && !checkUuidValid({ data: userId })))
