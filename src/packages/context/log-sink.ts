@@ -9,6 +9,8 @@
  */
 export interface RequestLogEntry {
   serviceName: string;
+  /** Service address (e.g. `user-service:50051`), from `SERVICE_HOST` or `${SERVICE_NAME}:${PORT}`. */
+  host?: string;
   type: 'HTTP' | 'RPC';
   method?: string;
   path: string;
