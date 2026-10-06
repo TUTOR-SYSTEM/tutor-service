@@ -57,16 +57,15 @@ export class DashboardService {
     if (!userId || !checkUuidValid({ data: userId }))
       throw new BadRequestException(ERROR_MESSAGES.USER_ID_MUST_BE_UUID);
 
-    const users = await this.userService.getUserByField({ field: 'id', value: userId });
-    const user = Array.isArray(users) ? users[0] : users;
+    const user = await this.userService.getUserRoleById(userId);
     if (!user) throw new NotFoundException(ERROR_MESSAGES.USER_NOT_FOUND);
 
     const role = user.role ?? 'STUDENT';
     const isStudent = role === 'STUDENT';
 
-    const classIds = isStudent
-      ? await this.repo.getStudentClassIds(userId)
-      : await this.repo.getTutorClassIds(userId);
+    const scope = isStudent
+      ? this.repo.studentClassScope(userId)
+      : this.repo.tutorClassScope(userId);
 
     const now = new Date();
     const weekStart = this.startOfWeek(now);
@@ -77,10 +76,11 @@ export class DashboardService {
     const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
     const year = now.getFullYear();
 
+    const tuitionStudent = isStudent ? userId : undefined;
     const [
+      classesCount,
       studentsCount,
       sessionStats,
-      todaySessions,
       todaySchedule,
       upcomingSchedule,
       revenueThisMonth,
@@ -88,29 +88,26 @@ export class DashboardService {
       monthlySessions,
       monthlyStudents,
       monthlyClasses,
+      tuition,
     ] = await Promise.all([
-      isStudent ? Promise.resolve(0) : this.repo.countStudents(classIds),
-      this.repo.getSessionStats(classIds, weekStart, weekEnd),
-      this.repo.getSessionsToday(classIds, dayStart, dayEnd),
-      this.repo.getSchedule(classIds, dayStart, dayEnd),
-      this.repo.getUpcomingSchedule(classIds, now, 5),
-      isStudent ? Promise.resolve(0) : this.repo.getRevenue(classIds, monthStart, monthEnd),
-      this.repo.getMonthlyRevenue(classIds, year),
-      this.repo.getMonthlySessions(classIds, year),
-      this.repo.getNewStudentsByMonth(classIds, year),
-      this.repo.getNewClassesByMonth(classIds, year),
+      this.repo.countClasses(scope),
+      isStudent ? Promise.resolve(0) : this.repo.countStudents(scope),
+      this.repo.getSessionStats(
+        scope,
+        { from: weekStart, to: weekEnd },
+        { from: dayStart, to: dayEnd },
+      ),
+      this.repo.getSchedule(scope, dayStart, dayEnd),
+      this.repo.getUpcomingSchedule(scope, now, 5),
+      isStudent ? Promise.resolve(0) : this.repo.getRevenue(scope, monthStart, monthEnd),
+      this.repo.getMonthlyRevenue(scope, year),
+      this.repo.getMonthlySessions(scope, year),
+      this.repo.getNewStudentsByMonth(scope, year),
+      this.repo.getNewClassesByMonth(scope, year),
+      this.repo.getTuitionSums(scope, tuitionStudent),
     ]);
 
-    const overdue = await this.repo.getTuitionSum(
-      classIds,
-      'OVERDUE',
-      isStudent ? userId : undefined,
-    );
-    const unpaid = await this.repo.getTuitionSum(
-      classIds,
-      'UNPAID',
-      isStudent ? userId : undefined,
-    );
+    const { OVERDUE: overdue, UNPAID: unpaid } = tuition;
     const unpaidTuitionAmount = isStudent ? unpaid.total + overdue.total : unpaid.total;
 
     let cumulativeRevenue = 0;
@@ -131,12 +128,12 @@ export class DashboardService {
     return {
       role,
       stats: {
-        classesCount: classIds.length,
+        classesCount,
         studentsCount,
         sessionsThisWeek: sessionStats.total,
         sessionsCompletedThisWeek: sessionStats.completed,
-        sessionsTodayCompleted: todaySessions.completed,
-        sessionsTodayPending: todaySessions.pending,
+        sessionsTodayCompleted: sessionStats.todayCompleted,
+        sessionsTodayPending: sessionStats.todayPending,
         revenueThisMonth,
         overdueTuitionCount: overdue.count,
         unpaidTuitionAmount,

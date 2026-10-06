@@ -20,15 +20,7 @@ export class ScheduleService {
 
   // todo : ensure the acting user owns the target class ...
   private async assertClassOwner({ userId, classId }: { userId: string; classId: string }) {
-    if (!classId || !checkUuidValid({ data: classId }))
-      throw new BadRequestException(ERROR_MESSAGES.CLASS_ID_MUST_BE_UUID);
-
-    const classData = await this.classService.getClassService({ userId, id: classId });
-    if (!classData || (Array.isArray(classData) && classData.length === 0))
-      throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
-    if (classData.tutorId !== userId) throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
-
-    return classData;
+    return this.classService.getOwnedClassService({ userId, id: classId });
   }
 
   private async loadOwnedSchedule({ userId, id }: { userId: string; id: string }) {

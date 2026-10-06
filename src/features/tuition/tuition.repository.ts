@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, count, desc, eq, type SQL, sum } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, or, type SQL, sum } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { DRIZZLE } from '../../database/database.module';
 import { classes, tuitions, users } from '@tutor/gateway/schema';
@@ -22,6 +22,19 @@ export class TuitionRepository {
     studentPhone: users.phone,
     studentAvatar: users.avatar,
   };
+
+  /** Class ids owned by the tutor (subquery — no id round trip). */
+  private ownedClassIds(userId: string) {
+    return this.db.select({ id: classes.id }).from(classes).where(eq(classes.tutorId, userId));
+  }
+
+  /** A user may read a tuition if they are its student or the tutor of its class. */
+  private canRead(userId: string) {
+    return or(
+      eq(tuitions.studentId, userId),
+      inArray(tuitions.classId, this.ownedClassIds(userId)),
+    );
+  }
 
   private serialize(r: {
     tuition: typeof tuitions.$inferSelect;
@@ -64,9 +77,11 @@ export class TuitionRepository {
     return this.findById(tuition.id);
   }
 
-  async findAll(query: GetTuitionsQueryDto) {
+  async findAll({ userId, query }: { userId: string; query: GetTuitionsQueryDto }) {
     const { page, limit, classId, studentId, status } = query;
     const conditions: SQL[] = [];
+    const access = this.canRead(userId);
+    if (access) conditions.push(access);
 
     if (classId) conditions.push(eq(tuitions.classId, classId));
     if (studentId) conditions.push(eq(tuitions.studentId, studentId));
@@ -94,13 +109,15 @@ export class TuitionRepository {
     };
   }
 
-  async findById(id: string) {
+  /** When `userId` is given the row is only returned if that user may read it. */
+  async findById(id: string, userId?: string) {
     const [row] = await this.db
       .select(this.joinedColumns)
       .from(tuitions)
       .innerJoin(classes, eq(tuitions.classId, classes.id))
       .innerJoin(users, eq(tuitions.studentId, users.id))
-      .where(eq(tuitions.id, id));
+      .where(and(eq(tuitions.id, id), userId ? this.canRead(userId) : undefined))
+      .limit(1);
     return row ? this.serialize(row) : null;
   }
 
@@ -119,29 +136,49 @@ export class TuitionRepository {
     return !!tuition;
   }
 
-  async getSummary(classId?: string) {
-    const conditions: SQL[] = [];
-    if (classId) conditions.push(eq(tuitions.classId, classId));
-    const where = conditions.length > 0 ? and(...conditions) : undefined;
+  /** Owning tutor of a class (2 columns, no joins) for ownership checks. */
+  async getClassTutorId(classId: string): Promise<string | null> {
+    const [row] = await this.db
+      .select({ tutorId: classes.tutorId })
+      .from(classes)
+      .where(eq(classes.id, classId))
+      .limit(1);
+    return row?.tutorId ?? null;
+  }
 
-    const [paidRow] = await this.db
-      .select({ total: sum(tuitions.amount) })
+  /** Tuition + its class's tutor in one query, for update/delete ownership checks. */
+  async findOwnerById(id: string): Promise<{ id: string; tutorId: string } | null> {
+    const [row] = await this.db
+      .select({ id: tuitions.id, tutorId: classes.tutorId })
       .from(tuitions)
-      .where(and(where, eq(tuitions.status, 'PAID')));
-    const [unpaidRow] = await this.db
-      .select({ total: sum(tuitions.amount) })
+      .innerJoin(classes, eq(tuitions.classId, classes.id))
+      .where(eq(tuitions.id, id))
+      .limit(1);
+    return row ?? null;
+  }
+
+  /** Revenue summary over the classes the tutor owns (optionally narrowed to one class). */
+  async getSummary({ userId, classId }: { userId: string; classId?: string }) {
+    const where = and(
+      inArray(tuitions.classId, this.ownedClassIds(userId)),
+      classId ? eq(tuitions.classId, classId) : undefined,
+    );
+
+    // one grouped scan instead of three sequential sum() queries
+    const rows = await this.db
+      .select({ status: tuitions.status, total: sum(tuitions.amount) })
       .from(tuitions)
-      .where(and(where, eq(tuitions.status, 'UNPAID')));
-    const [overdueRow] = await this.db
-      .select({ total: sum(tuitions.amount) })
-      .from(tuitions)
-      .where(and(where, eq(tuitions.status, 'OVERDUE')));
+      .where(where)
+      .groupBy(tuitions.status);
+
+    const totalOf = (status: string) => Number(rows.find((r) => r.status === status)?.total ?? 0);
+    const totalPaid = totalOf('PAID');
 
     return {
-      totalPaid: Number(paidRow?.total ?? 0),
-      totalUnpaid: Number(unpaidRow?.total ?? 0),
-      totalOverdue: Number(overdueRow?.total ?? 0),
-      totalRevenue: Number(paidRow?.total ?? 0),
+      totalPaid,
+      totalUnpaid: totalOf('UNPAID'),
+      totalOverdue: totalOf('OVERDUE'),
+      totalRevenue: totalPaid,
     };
   }
 }

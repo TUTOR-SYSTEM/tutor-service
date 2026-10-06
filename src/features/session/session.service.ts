@@ -40,8 +40,8 @@ export class SessionService {
     // the acting tutor owns the class, so default the session tutor to them; if an explicit
     // tutorId is supplied, it must reference a real user.
     if (tutorId && tutorId !== userId) {
-      const tutor = await this.userService.getUserByField({ field: 'id', value: tutorId });
-      if (!tutor || tutor.length === 0) throw new NotFoundException(ERROR_MESSAGES.TUTOR_NOT_FOUND);
+      if (!(await this.userService.userExists(tutorId)))
+        throw new NotFoundException(ERROR_MESSAGES.TUTOR_NOT_FOUND);
     }
 
     return { lessonId: lessonId ?? null, tutorId: tutorId ?? userId };
@@ -49,15 +49,7 @@ export class SessionService {
 
   // todo : ensure the acting user owns the target class ...
   private async assertClassOwner({ userId, classId }: { userId: string; classId: string }) {
-    if (!classId || !checkUuidValid({ data: classId }))
-      throw new BadRequestException(ERROR_MESSAGES.CLASS_ID_MUST_BE_UUID);
-
-    const classData = await this.classService.getClassService({ userId, id: classId });
-    if (!classData || (Array.isArray(classData) && classData.length === 0))
-      throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
-    if (classData.tutorId !== userId) throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
-
-    return classData;
+    return this.classService.getOwnedClassService({ userId, id: classId });
   }
 
   // a session counts as "ended" only once the tutor marks it COMPLETED — students and parents
@@ -108,14 +100,21 @@ export class SessionService {
       throw new BadRequestException(ERROR_MESSAGES.USER_ID_MUST_BE_UUID);
 
     await this.assertClassOwner({ userId, classId: data.classId });
+    // resolve each distinct lesson/tutor once, not once per session
+    const refCache = new Map<string, Promise<{ lessonId: string | null; tutorId: string }>>();
+    const resolveRefs = (lessonId?: string | null, tutorId?: string | null) => {
+      const key = `${lessonId ?? ''}|${tutorId ?? ''}`;
+      let pending = refCache.get(key);
+      if (!pending) {
+        pending = this.resolveSessionRefs({ userId, lessonId, tutorId });
+        refCache.set(key, pending);
+      }
+      return pending;
+    };
     const items = await Promise.all(
       data.sessions.map(async (session) => ({
         ...session,
-        ...(await this.resolveSessionRefs({
-          userId,
-          lessonId: session.lessonId,
-          tutorId: session.tutorId,
-        })),
+        ...(await resolveRefs(session.lessonId, session.tutorId)),
       })),
     );
     const created = await this.repo.createMany({ classId: data.classId, items });

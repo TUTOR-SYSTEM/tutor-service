@@ -130,7 +130,7 @@ export class SessionRepository {
       .from(sessions)
       .leftJoin(classes, eq(sessions.classId, classes.id))
       .where(whereClause)
-      .orderBy(desc(sessions.startAt))
+      .orderBy(desc(sessions.startAt), sessions.id)
       .limit(limitNumber)
       .offset(offset);
 

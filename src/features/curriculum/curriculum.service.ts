@@ -1,7 +1,6 @@
 import {
   BadRequestException,
   ConflictException,
-  Inject,
   Injectable,
   Logger,
   NotFoundException,
@@ -9,8 +8,6 @@ import {
 import { ERROR_MESSAGES } from 'src/data/constants';
 import { CurriculumRepository } from './curriculum.repository';
 import { UserService } from '../user/user.service';
-import { drizzle } from 'drizzle-orm/singlestore';
-import { DRIZZLE } from 'src/database/database.module';
 import { type GetCurriculumsQueryDto, type CreateCurriculumDto } from '@packages/entities';
 import { checkUuidValid, generateCode } from '@packages/helpers';
 
@@ -20,8 +17,6 @@ export class CurriculumService {
   constructor(
     private readonly curriculumRepository: CurriculumRepository,
     private readonly userService: UserService,
-    @Inject(DRIZZLE)
-    private readonly db: ReturnType<typeof drizzle>,
   ) {}
 
   async generateNewCodeService(): Promise<string | null> {
@@ -51,14 +46,8 @@ export class CurriculumService {
       throw new BadRequestException(ERROR_MESSAGES.USER_ID_MUST_BE_UUID);
     }
 
-    const user = await this.userService.getUserByField({
-      field: 'id',
-      value: userId,
-    });
-    if (Array.isArray(user) && user.length === 0) {
+    if (!(await this.userService.userExists(userId)))
       throw new BadRequestException(ERROR_MESSAGES.USER_NOT_FOUND);
-    }
-
     return await this.curriculumRepository.create({ userId, data: createCurriculum });
   }
 
@@ -74,14 +63,8 @@ export class CurriculumService {
       throw new BadRequestException(ERROR_MESSAGES.USER_ID_MUST_BE_UUID);
     }
 
-    const user = await this.userService.getUserByField({
-      field: 'id',
-      value: userId,
-    });
-    if (Array.isArray(user) && user.length === 0) {
+    if (!(await this.userService.userExists(userId)))
       throw new BadRequestException(ERROR_MESSAGES.USER_NOT_FOUND);
-    }
-
     this.logger.log('query :', query);
     return await this.curriculumRepository.findAll({
       page: query.page,
@@ -98,14 +81,8 @@ export class CurriculumService {
       throw new BadRequestException(ERROR_MESSAGES.CURRICULUM_ID_INVALID);
     }
 
-    const user = await this.userService.getUserByField({
-      field: 'id',
-      value: userId,
-    });
-    if (!user || (Array.isArray(user) && user.length === 0)) {
+    if (!(await this.userService.userExists(userId)))
       throw new BadRequestException(ERROR_MESSAGES.USER_NOT_FOUND);
-    }
-
     return await this.curriculumRepository.findByIdWithDetails(id);
   }
 
@@ -125,14 +102,8 @@ export class CurriculumService {
       throw new BadRequestException(ERROR_MESSAGES.CURRICULUM_ID_INVALID);
     }
 
-    const user = await this.userService.getUserByField({
-      field: 'id',
-      value: userId,
-    });
-    if (!user || (Array.isArray(user) && user.length === 0)) {
+    if (!(await this.userService.userExists(userId)))
       throw new BadRequestException(ERROR_MESSAGES.USER_NOT_FOUND);
-    }
-
     const existing = await this.curriculumRepository.findById(id);
     if (!existing) throw new NotFoundException(ERROR_MESSAGES.CURRICULUM_NOT_FOUND);
 
@@ -147,14 +118,8 @@ export class CurriculumService {
       throw new BadRequestException(ERROR_MESSAGES.CURRICULUM_ID_INVALID);
     }
 
-    const user = await this.userService.getUserByField({
-      field: 'id',
-      value: userId,
-    });
-    if (!user || (Array.isArray(user) && user.length === 0)) {
+    if (!(await this.userService.userExists(userId)))
       throw new BadRequestException(ERROR_MESSAGES.USER_NOT_FOUND);
-    }
-
     const existing = await this.curriculumRepository.findById(id);
     if (!existing) throw new NotFoundException(ERROR_MESSAGES.CURRICULUM_NOT_FOUND);
 

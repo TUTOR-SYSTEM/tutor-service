@@ -3,6 +3,8 @@ import { query, type Options, type SDKMessage } from '@anthropic-ai/claude-agent
 import type { ChatDto, GetHistoryQueryDto } from '@packages/entities/ai-chat';
 import { CLAUDE_MODELS } from './agents.config';
 
+const MAX_HISTORY_PER_USER = 100; // bound memory: this map lives for the process lifetime
+
 export interface AiChatMessage {
   role: 'user' | 'assistant';
   content: string;
@@ -38,11 +40,17 @@ export class AgentsService {
     const answer = await this.run(data.message);
     const replyText =
       answer
-        .map((message) => ('text' in message && typeof message.text === 'string' ? message.text : ''))
+        .map((message) =>
+          'text' in message && typeof message.text === 'string' ? message.text : '',
+        )
         .filter(Boolean)
         .join('\n') || 'Không có phản hồi từ trợ lý.';
 
-    const reply: AiChatMessage = { role: 'assistant', content: replyText, createdAt: new Date().toISOString() };
+    const reply: AiChatMessage = {
+      role: 'assistant',
+      content: replyText,
+      createdAt: new Date().toISOString(),
+    };
     this.appendHistory(userId, data.message);
     this.appendHistory(userId, reply.content, 'assistant');
 
@@ -65,6 +73,8 @@ export class AgentsService {
   private appendHistory(userId: string, content: string, role: AiChatMessage['role'] = 'user') {
     const entries = this.history.get(userId) ?? [];
     entries.push({ role, content, createdAt: new Date().toISOString() });
+    if (entries.length > MAX_HISTORY_PER_USER)
+      entries.splice(0, entries.length - MAX_HISTORY_PER_USER);
     this.history.set(userId, entries);
   }
 }

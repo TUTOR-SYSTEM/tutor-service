@@ -127,7 +127,7 @@ export class ExerciseRepository {
       .leftJoin(classes, eq(sessions.classId, classes.id))
       .leftJoin(users, eq(exercise.studentId, users.id))
       .where(whereClause)
-      .orderBy(desc(exercise.updatedAt))
+      .orderBy(desc(exercise.updatedAt), exercise.id)
       .limit(limit)
       .offset(offset);
 

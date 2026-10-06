@@ -32,7 +32,8 @@ export class ClassRepository {
     const [result] = await this.db
       .select()
       .from(classes)
-      .where(eq(fieldMaps[field], value ?? ''));
+      .where(eq(fieldMaps[field], value ?? ''))
+      .limit(1);
     return result;
   }
 

@@ -1,5 +1,17 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, countDistinct, eq, gte, gt, inArray, lte, sql } from 'drizzle-orm';
+import {
+  and,
+  countDistinct,
+  eq,
+  gte,
+  gt,
+  inArray,
+  lt,
+  lte,
+  sql,
+  type AnyColumn,
+  type SQLWrapper,
+} from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { DRIZZLE } from '../../database/database.module';
 import { classStudents, classes, sessions, tuitions } from '@tutor/gateway/schema';
@@ -24,6 +36,33 @@ export interface MonthlyRow {
   cumulativeRevenue: number;
 }
 
+/** Drizzle subquery selecting class ids; usable as the right side of `inArray`. */
+export type ClassScope = SQLWrapper;
+
+type RawScheduleRow = Omit<TodayScheduleRow, 'startAt' | 'endAt'> & {
+  startAt: Date | string;
+  endAt: Date | string;
+};
+
+const toIso = (v: Date | string) => (v instanceof Date ? v.toISOString() : String(v));
+
+const toScheduleRow = (r: RawScheduleRow): TodayScheduleRow => ({
+  id: r.id,
+  startAt: toIso(r.startAt),
+  endAt: toIso(r.endAt),
+  title: r.title,
+  className: r.className,
+  subject: r.subject,
+  format: r.format,
+  location: r.location,
+});
+
+/** [Jan 1, next Jan 1) bounds on a column — lets Postgres use an index, unlike extract(year). */
+const yearRange = (column: AnyColumn, year: number) => [
+  gte(column, new Date(year, 0, 1)),
+  lt(column, new Date(year + 1, 0, 1)),
+];
+
 @Injectable()
 export class DashboardRepository {
   constructor(
@@ -31,60 +70,71 @@ export class DashboardRepository {
     private readonly db: ReturnType<typeof drizzle>,
   ) {}
 
-  /** Class ids owned by the tutor. */
-  async getTutorClassIds(userId: string): Promise<string[]> {
-    const rows = await this.db
-      .select({ id: classes.id })
-      .from(classes)
-      .where(eq(classes.tutorId, userId));
-    return rows.map((r) => r.id);
+  /** Subquery of class ids owned by the tutor (embedded in `IN (...)`, no id round trip). */
+  tutorClassScope(userId: string): ClassScope {
+    return this.db.select({ id: classes.id }).from(classes).where(eq(classes.tutorId, userId));
   }
 
-  /** Class ids the student is enrolled in. */
-  async getStudentClassIds(userId: string): Promise<string[]> {
-    const rows = await this.db
+  /** Subquery of class ids the student is enrolled in. */
+  studentClassScope(userId: string): ClassScope {
+    return this.db
       .select({ id: classStudents.classId })
       .from(classStudents)
       .where(eq(classStudents.studentId, userId));
-    return rows.map((r) => r.id);
   }
 
-  /** Distinct students enrolled across the given classes. */
-  async countStudents(classIds: string[]): Promise<number> {
-    if (classIds.length === 0) return 0;
+  async countClasses(scope: ClassScope): Promise<number> {
     const [row] = await this.db
-      .select({ total: countDistinct(classStudents.studentId) })
-      .from(classStudents)
-      .where(inArray(classStudents.classId, classIds));
+      .select({ total: sql<number>`count(*)::int` })
+      .from(classes)
+      .where(inArray(classes.id, scope));
     return Number(row?.total ?? 0);
   }
 
-  /** Session counts (total + completed) within [from, to]. */
+  /** Distinct students enrolled across the given classes. */
+  async countStudents(scope: ClassScope): Promise<number> {
+    const [row] = await this.db
+      .select({ total: countDistinct(classStudents.studentId) })
+      .from(classStudents)
+      .where(inArray(classStudents.classId, scope));
+    return Number(row?.total ?? 0);
+  }
+
+  /**
+   * One scan over the week window: week totals plus today's completed/pending split
+   * ("pending" = not finished and not cancelled).
+   */
   async getSessionStats(
-    classIds: string[],
-    from: Date,
-    to: Date,
-  ): Promise<{ total: number; completed: number }> {
-    if (classIds.length === 0) return { total: 0, completed: 0 };
+    scope: ClassScope,
+    week: { from: Date; to: Date },
+    day: { from: Date; to: Date },
+  ): Promise<{ total: number; completed: number; todayCompleted: number; todayPending: number }> {
+    const today = and(gte(sessions.startAt, day.from), lte(sessions.startAt, day.to));
     const [row] = await this.db
       .select({
         total: sql<number>`count(*)::int`,
         completed: sql<number>`count(*) filter (where ${sessions.status} = 'COMPLETED')::int`,
+        todayCompleted: sql<number>`count(*) filter (where ${sessions.status} = 'COMPLETED' and ${today})::int`,
+        todayPending: sql<number>`count(*) filter (where ${sessions.status} not in ('COMPLETED', 'CANCELLED') and ${today})::int`,
       })
       .from(sessions)
       .where(
         and(
-          inArray(sessions.classId, classIds),
-          gte(sessions.startAt, from),
-          lte(sessions.startAt, to),
+          inArray(sessions.classId, scope),
+          gte(sessions.startAt, week.from),
+          lte(sessions.startAt, week.to),
         ),
       );
-    return { total: Number(row?.total ?? 0), completed: Number(row?.completed ?? 0) };
+    return {
+      total: Number(row?.total ?? 0),
+      completed: Number(row?.completed ?? 0),
+      todayCompleted: Number(row?.todayCompleted ?? 0),
+      todayPending: Number(row?.todayPending ?? 0),
+    };
   }
 
   /** Sessions scheduled within [from, to], with class info, ordered by start time. */
-  async getSchedule(classIds: string[], from: Date, to: Date): Promise<TodayScheduleRow[]> {
-    if (classIds.length === 0) return [];
+  async getSchedule(scope: ClassScope, from: Date, to: Date): Promise<TodayScheduleRow[]> {
     const rows = await this.db
       .select({
         id: sessions.id,
@@ -100,61 +150,22 @@ export class DashboardRepository {
       .innerJoin(classes, eq(classes.id, sessions.classId))
       .where(
         and(
-          inArray(sessions.classId, classIds),
+          inArray(sessions.classId, scope),
           gte(sessions.startAt, from),
           lte(sessions.startAt, to),
         ),
       )
       .orderBy(sessions.startAt);
 
-    return rows.map((r) => ({
-      id: r.id,
-      startAt: r.startAt instanceof Date ? r.startAt.toISOString() : String(r.startAt),
-      endAt: r.endAt instanceof Date ? r.endAt.toISOString() : String(r.endAt),
-      title: r.title,
-      className: r.className,
-      subject: r.subject,
-      format: r.format,
-      location: r.location,
-    }));
-  }
-
-  /**
-   * Session counts for today split by already-completed vs still pending.
-   * "Pending" means the session is not yet finished (SCHEDULED / ONGOING).
-   */
-  async getSessionsToday(
-    classIds: string[],
-    from: Date,
-    to: Date,
-  ): Promise<{ completed: number; pending: number }> {
-    if (classIds.length === 0) return { completed: 0, pending: 0 };
-    const [row] = await this.db
-      .select({
-        completed: sql<number>`count(*) filter (where ${sessions.status} = 'COMPLETED')::int`,
-        pending: sql<number>`count(*) filter (where ${sessions.status} != 'COMPLETED' and ${sessions.status} != 'CANCELLED')::int`,
-      })
-      .from(sessions)
-      .where(
-        and(
-          inArray(sessions.classId, classIds),
-          gte(sessions.startAt, from),
-          lte(sessions.startAt, to),
-        ),
-      );
-    return {
-      completed: Number(row?.completed ?? 0),
-      pending: Number(row?.pending ?? 0),
-    };
+    return rows.map(toScheduleRow);
   }
 
   /** Next `limit` upcoming sessions (start >= now, not finished), with class info. */
   async getUpcomingSchedule(
-    classIds: string[],
+    scope: ClassScope,
     after: Date,
     limit: number,
   ): Promise<TodayScheduleRow[]> {
-    if (classIds.length === 0) return [];
     const rows = await this.db
       .select({
         id: sessions.id,
@@ -170,7 +181,7 @@ export class DashboardRepository {
       .innerJoin(classes, eq(classes.id, sessions.classId))
       .where(
         and(
-          inArray(sessions.classId, classIds),
+          inArray(sessions.classId, scope),
           gt(sessions.startAt, after),
           sql`${sessions.status} != 'COMPLETED'`,
           sql`${sessions.status} != 'CANCELLED'`,
@@ -179,22 +190,12 @@ export class DashboardRepository {
       .orderBy(sessions.startAt)
       .limit(limit);
 
-    return rows.map((r) => ({
-      id: r.id,
-      startAt: r.startAt instanceof Date ? r.startAt.toISOString() : String(r.startAt),
-      endAt: r.endAt instanceof Date ? r.endAt.toISOString() : String(r.endAt),
-      title: r.title,
-      className: r.className,
-      subject: r.subject,
-      format: r.format,
-      location: r.location,
-    }));
+    return rows.map(toScheduleRow);
   }
 
   /** Per-month newly enrolled students (class_students.createdAt) for a year. */
-  async getNewStudentsByMonth(classIds: string[], year: number): Promise<Map<number, number>> {
+  async getNewStudentsByMonth(scope: ClassScope, year: number): Promise<Map<number, number>> {
     const map = new Map<number, number>();
-    if (classIds.length === 0) return map;
     const rows = await this.db
       .select({
         month: sql<number>`extract(month from ${classStudents.createdAt})::int`,
@@ -202,10 +203,7 @@ export class DashboardRepository {
       })
       .from(classStudents)
       .where(
-        and(
-          inArray(classStudents.classId, classIds),
-          sql`extract(year from ${classStudents.createdAt}) = ${year}`,
-        ),
+        and(inArray(classStudents.classId, scope), ...yearRange(classStudents.createdAt, year)),
       )
       .groupBy(sql`extract(month from ${classStudents.createdAt})`);
     for (const r of rows) map.set(Number(r.month), Number(r.total));
@@ -213,32 +211,28 @@ export class DashboardRepository {
   }
 
   /** Per-month newly created classes for a year. */
-  async getNewClassesByMonth(classIds: string[], year: number): Promise<Map<number, number>> {
+  async getNewClassesByMonth(scope: ClassScope, year: number): Promise<Map<number, number>> {
     const map = new Map<number, number>();
-    if (classIds.length === 0) return map;
     const rows = await this.db
       .select({
         month: sql<number>`extract(month from ${classes.createdAt})::int`,
         total: sql<number>`count(*)::int`,
       })
       .from(classes)
-      .where(
-        and(inArray(classes.id, classIds), sql`extract(year from ${classes.createdAt}) = ${year}`),
-      )
+      .where(and(inArray(classes.id, scope), ...yearRange(classes.createdAt, year)))
       .groupBy(sql`extract(month from ${classes.createdAt})`);
     for (const r of rows) map.set(Number(r.month), Number(r.total));
     return map;
   }
 
   /** Tuition revenue (PAID) within [from, to] for the given classes. */
-  async getRevenue(classIds: string[], from: Date, to: Date): Promise<number> {
-    if (classIds.length === 0) return 0;
+  async getRevenue(scope: ClassScope, from: Date, to: Date): Promise<number> {
     const [row] = await this.db
       .select({ total: sql<string>`coalesce(sum(${tuitions.amount}), 0)` })
       .from(tuitions)
       .where(
         and(
-          inArray(tuitions.classId, classIds),
+          inArray(tuitions.classId, scope),
           eq(tuitions.status, 'PAID'),
           gte(tuitions.paidDate, from),
           lte(tuitions.paidDate, to),
@@ -247,29 +241,36 @@ export class DashboardRepository {
     return Number(row?.total ?? 0);
   }
 
-  /** Sum of tuition amounts in a given status for the given classes (optionally by student). */
-  async getTuitionSum(
-    classIds: string[],
-    status: 'PAID' | 'UNPAID' | 'OVERDUE',
+  /** OVERDUE + UNPAID tuition totals in one grouped query (optionally for one student). */
+  async getTuitionSums(
+    scope: ClassScope,
     studentId?: string,
-  ): Promise<{ total: number; count: number }> {
-    if (classIds.length === 0) return { total: 0, count: 0 };
-    const conditions = [inArray(tuitions.classId, classIds), eq(tuitions.status, status)];
+  ): Promise<Record<'OVERDUE' | 'UNPAID', { total: number; count: number }>> {
+    const conditions = [
+      inArray(tuitions.classId, scope),
+      inArray(tuitions.status, ['OVERDUE', 'UNPAID']),
+    ];
     if (studentId) conditions.push(eq(tuitions.studentId, studentId));
-    const [row] = await this.db
+    const rows = await this.db
       .select({
+        status: tuitions.status,
         total: sql<string>`coalesce(sum(${tuitions.amount}), 0)`,
         count: sql<number>`count(*)::int`,
       })
       .from(tuitions)
-      .where(and(...conditions));
-    return { total: Number(row?.total ?? 0), count: Number(row?.count ?? 0) };
+      .where(and(...conditions))
+      .groupBy(tuitions.status);
+    const out = { OVERDUE: { total: 0, count: 0 }, UNPAID: { total: 0, count: 0 } };
+    for (const r of rows) {
+      if (r.status === 'OVERDUE' || r.status === 'UNPAID')
+        out[r.status] = { total: Number(r.total), count: Number(r.count) };
+    }
+    return out;
   }
 
   /** Per-month PAID revenue for a year. */
-  async getMonthlyRevenue(classIds: string[], year: number): Promise<Map<number, number>> {
+  async getMonthlyRevenue(scope: ClassScope, year: number): Promise<Map<number, number>> {
     const map = new Map<number, number>();
-    if (classIds.length === 0) return map;
     const rows = await this.db
       .select({
         month: sql<number>`extract(month from ${tuitions.paidDate})::int`,
@@ -278,9 +279,9 @@ export class DashboardRepository {
       .from(tuitions)
       .where(
         and(
-          inArray(tuitions.classId, classIds),
+          inArray(tuitions.classId, scope),
           eq(tuitions.status, 'PAID'),
-          sql`extract(year from ${tuitions.paidDate}) = ${year}`,
+          ...yearRange(tuitions.paidDate, year),
         ),
       )
       .groupBy(sql`extract(month from ${tuitions.paidDate})`);
@@ -289,21 +290,15 @@ export class DashboardRepository {
   }
 
   /** Per-month session counts for a year. */
-  async getMonthlySessions(classIds: string[], year: number): Promise<Map<number, number>> {
+  async getMonthlySessions(scope: ClassScope, year: number): Promise<Map<number, number>> {
     const map = new Map<number, number>();
-    if (classIds.length === 0) return map;
     const rows = await this.db
       .select({
         month: sql<number>`extract(month from ${sessions.startAt})::int`,
         total: sql<number>`count(*)::int`,
       })
       .from(sessions)
-      .where(
-        and(
-          inArray(sessions.classId, classIds),
-          sql`extract(year from ${sessions.startAt}) = ${year}`,
-        ),
-      )
+      .where(and(inArray(sessions.classId, scope), ...yearRange(sessions.startAt, year)))
       .groupBy(sql`extract(month from ${sessions.startAt})`);
     for (const r of rows) map.set(Number(r.month), Number(r.total));
     return map;
