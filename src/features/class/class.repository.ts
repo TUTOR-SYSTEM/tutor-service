@@ -12,7 +12,7 @@ import {
   schedules,
   sessions,
   users,
-} from '@tutor/gateway/schema';
+} from 'src/database/schema';
 import { buildListWhereClause } from '@packages/helpers';
 
 @Injectable()

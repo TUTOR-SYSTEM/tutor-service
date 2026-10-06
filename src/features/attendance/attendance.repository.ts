@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { DRIZZLE } from '../../database/database.module';
-import { attendances } from '@tutor/gateway/schema';
+import { attendances } from 'src/database/schema';
 import type { UpsertAttendanceDto } from '@packages/entities/attendance';
 
 @Injectable()

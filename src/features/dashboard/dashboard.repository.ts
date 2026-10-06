@@ -14,7 +14,7 @@ import {
 } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { DRIZZLE } from '../../database/database.module';
-import { classStudents, classes, sessions, tuitions } from '@tutor/gateway/schema';
+import { classStudents, classes, sessions, tuitions } from 'src/database/schema';
 
 export interface TodayScheduleRow {
   id: string;

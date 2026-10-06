@@ -15,7 +15,7 @@ import { Inject } from '@nestjs/common';
 import { DRIZZLE } from '../../database/database.module';
 import { type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { eq } from 'drizzle-orm';
-import { users } from '@tutor/gateway/schema';
+import { users } from 'src/database/schema';
 import { MessageService } from './message.service';
 import { ConversationService } from './conversation.service';
 
