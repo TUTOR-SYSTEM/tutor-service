@@ -4,6 +4,7 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import { DRIZZLE } from '../../database/database.module';
 import { classes, tuitions, users } from 'src/database/schema';
 import type { CreateTuitionDto, GetTuitionsQueryDto } from '@packages/entities/tuition';
+import { toDate } from '@packages/helpers/date.helper';
 
 @Injectable()
 export class TuitionRepository {
@@ -68,8 +69,8 @@ export class TuitionRepository {
         classId: data.classId,
         studentId: data.studentId,
         amount: String(data.amount),
-        dueDate: data.dueDate ?? null,
-        paidDate: data.paidDate ?? null,
+        dueDate: toDate(data.dueDate) ?? null,
+        paidDate: toDate(data.paidDate) ?? null,
         status: data.status ?? 'UNPAID',
         note: data.note ?? null,
       })
@@ -79,15 +80,13 @@ export class TuitionRepository {
 
   async findAll({ userId, query }: { userId: string; query: GetTuitionsQueryDto }) {
     const { page, limit, classId, studentId, status } = query;
-    const conditions: SQL[] = [];
-    const access = this.canRead(userId);
-    if (access) conditions.push(access);
+    const conditions: (SQL | undefined)[] = [this.canRead(userId)];
 
     if (classId) conditions.push(eq(tuitions.classId, classId));
     if (studentId) conditions.push(eq(tuitions.studentId, studentId));
     if (status) conditions.push(eq(tuitions.status, status));
 
-    const where = conditions.length > 0 ? and(...conditions) : undefined;
+    const where = and(...conditions);
     const offset = (page - 1) * limit;
 
     const [totalRow] = await this.db.select({ total: count() }).from(tuitions).where(where);
@@ -122,9 +121,15 @@ export class TuitionRepository {
   }
 
   async update(id: string, data: Record<string, unknown>) {
+    const { dueDate, paidDate, ...rest } = data;
     const [tuition] = await this.db
       .update(tuitions)
-      .set({ ...data, updatedAt: new Date() })
+      .set({
+        ...rest,
+        ...(dueDate !== undefined && { dueDate: toDate(dueDate as Date | string | null) }),
+        ...(paidDate !== undefined && { paidDate: toDate(paidDate as Date | string | null) }),
+        updatedAt: new Date(),
+      })
       .where(eq(tuitions.id, id))
       .returning();
     if (!tuition) return null;

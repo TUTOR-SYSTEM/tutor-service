@@ -10,6 +10,7 @@ import {
 } from '@packages/entities/session';
 import { chapters, classStudents, classes, lessons, sessions, users } from 'src/database/schema';
 import { buildListWhereClause } from '@packages/helpers';
+import { toDate } from '@packages/helpers/date.helper';
 
 @Injectable()
 export class SessionRepository {
@@ -30,16 +31,16 @@ export class SessionRepository {
         sessionNumber: data.sessionNumber,
         theoryUrls: data.theoryUrls,
         exerciseUrls: data.exerciseUrls,
-        startAt: data.startAt,
-        endAt: data.endAt,
+        startAt: toDate(data.startAt),
+        endAt: toDate(data.endAt),
         location: data.location,
         status: data.status,
         note: data.note,
-        actualStartAt: data.actualStartAt,
-        actualEndAt: data.actualEndAt,
+        actualStartAt: toDate(data.actualStartAt),
+        actualEndAt: toDate(data.actualEndAt),
         objectives: data.objectives,
         agenda: data.agenda,
-        exerciseDueAt: data.exerciseDueAt,
+        exerciseDueAt: toDate(data.exerciseDueAt),
       })
       .returning();
     return session;
@@ -58,16 +59,16 @@ export class SessionRepository {
           sessionNumber: item.sessionNumber,
           theoryUrls: item.theoryUrls,
           exerciseUrls: item.exerciseUrls,
-          startAt: item.startAt,
-          endAt: item.endAt,
+          startAt: toDate(item.startAt),
+          endAt: toDate(item.endAt),
           location: item.location,
           status: item.status,
           note: item.note,
-          actualStartAt: item.actualStartAt,
-          actualEndAt: item.actualEndAt,
+          actualStartAt: toDate(item.actualStartAt),
+          actualEndAt: toDate(item.actualEndAt),
           objectives: item.objectives,
           agenda: item.agenda,
-          exerciseDueAt: item.exerciseDueAt,
+          exerciseDueAt: toDate(item.exerciseDueAt),
         })),
       )
       .returning();
@@ -224,16 +225,16 @@ export class SessionRepository {
         sessionNumber: data.sessionNumber,
         theoryUrls: data.theoryUrls,
         exerciseUrls: data.exerciseUrls,
-        startAt: data.startAt,
-        endAt: data.endAt,
+        startAt: toDate(data.startAt),
+        endAt: toDate(data.endAt),
         location: data.location,
         status: data.status,
         note: data.note,
-        actualStartAt: data.actualStartAt,
-        actualEndAt: data.actualEndAt,
+        actualStartAt: toDate(data.actualStartAt),
+        actualEndAt: toDate(data.actualEndAt),
         objectives: data.objectives,
         agenda: data.agenda,
-        exerciseDueAt: data.exerciseDueAt,
+        exerciseDueAt: toDate(data.exerciseDueAt),
         updatedAt: new Date(),
       })
       .where(eq(sessions.id, id))

@@ -14,6 +14,7 @@ import {
   users,
 } from 'src/database/schema';
 import { buildListWhereClause } from '@packages/helpers';
+import { toDate } from '@packages/helpers/date.helper';
 
 @Injectable()
 export class ClassRepository {
@@ -48,8 +49,8 @@ export class ClassRepository {
         description: data.description,
         status: data.status,
         format: data.format,
-        startTime: data.startTime,
-        endTime: data.endTime,
+        startTime: toDate(data.startTime),
+        endTime: toDate(data.endTime),
         location: data.location,
         curriculumId: data.curriculumId,
         tutorId: data.tutorId,
@@ -69,8 +70,8 @@ export class ClassRepository {
         ...(data.description !== undefined && { description: data.description }),
         ...(data.status !== undefined && { status: data.status }),
         ...(data.format !== undefined && { format: data.format }),
-        ...(data.startTime !== undefined && { startTime: data.startTime }),
-        ...(data.endTime !== undefined && { endTime: data.endTime }),
+        ...(data.startTime !== undefined && { startTime: toDate(data.startTime) }),
+        ...(data.endTime !== undefined && { endTime: toDate(data.endTime) }),
         ...(data.location !== undefined && { location: data.location }),
         ...(data.curriculumId !== undefined && { curriculumId: data.curriculumId }),
         updatedAt: new Date(),
