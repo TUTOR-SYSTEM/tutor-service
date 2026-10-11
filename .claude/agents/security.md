@@ -39,8 +39,12 @@ services, repositories, guards, and schema changes.
   (e.g. `row.tutorId !== userId`) before returning/mutating. A user must not read or delete
   another user's classes/sessions/etc. by guessing a UUID. Verify new routes aren't
   accidentally `@Public()` and admin actions use `@Roles('ADMIN')` + `RolesGuard` (there is no
-  `@Admin()` decorator in this repo).
-- **AuthN**: JWT verification not bypassed; access vs. refresh secrets not confused; token
+  `@Admin()` decorator in this repo). Writes on curriculum, chapter and lesson must authorize
+  through `curriculum.userId` (the RPC payload must carry `userId`); class creation is limited to
+  TUTOR/ADMIN with `tutorId === userId` unless ADMIN; exercise create must tie `tutorId` to the
+  session's class tutor. Flag any new `.partial()` update schema that wraps a `.default(...)`.
+- **AuthN**: JWT verification not bypassed; no fallback/hard-coded secret (use
+  `resolveJwtAccessSecret`); access vs. refresh secrets not confused; token
   TTLs sane; no tokens/passwords logged.
 - **Injection**: Drizzle used parameterized (no raw string SQL concatenation); dynamic column
   access (`fieldMaps`) is whitelisted, never taking arbitrary user keys.

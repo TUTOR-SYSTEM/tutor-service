@@ -103,9 +103,13 @@ export class SessionRepository {
       inArray(sessions.classId, ownedClassIds),
       inArray(sessions.classId, enrolledClassIds),
     );
+    // Dates arrive as ISO strings after the RPC JSON round trip; drizzle's `timestamp` columns
+    // call `toISOString()` on the bound value, so convert first (same rule as the write paths).
+    const from = toDate(startDate);
+    const to = toDate(endDate);
     const dateWhere = and(
-      ...(startDate ? [gte(sessions.startAt, startDate)] : []),
-      ...(endDate ? [lte(sessions.startAt, endDate)] : []),
+      ...(from ? [gte(sessions.startAt, from)] : []),
+      ...(to ? [lte(sessions.startAt, to)] : []),
     );
     const whereClause = and(
       ...[searchWhere, accessWhere, dateWhere].filter((c) => c !== undefined),

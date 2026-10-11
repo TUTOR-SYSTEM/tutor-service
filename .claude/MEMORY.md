@@ -107,3 +107,13 @@ to it currently.
 
 **Do NOT read entire source code.** Only read files necessary for the task — see
 `CLAUDE.md`'s "IMPORTANT: Selective File Reading" section for the full breakdown.
+
+## Security hardening (2026-10-11, from gateway/reviews/tutor-review.md)
+
+- Fixed: TUT-01 (curriculum/chapter/lesson ownership + gateway sends userId), TUT-02 (class create
+  role/tutor rules), TUT-03/04/12/22 (Zod `.partial()` defaults, in tutor AND gateway schemas),
+  TUT-05 (session date filter `toDate`), TUT-06 (chat join/read participant check), TUT-07
+  (exercise tutor/self-grade), TUT-08 (`POST /run` no longer public), TUT-11 (PAID stamps paidDate),
+  TUT-14 (HH:mm regex only), TUT-21 (no fallback JWT secret).
+- NOT done: TUT-09 (agents.service SDK text extraction), 10, 13, 15 (retries/noAck), 16–20, 23–33.
+  TUT-30 intentionally kept: `kafka.tutor` is used by `user` as a diagnostic endpoint.

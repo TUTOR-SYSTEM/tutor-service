@@ -1,4 +1,9 @@
-import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ERROR_MESSAGES } from 'src/data/constants';
 import { ClassService } from 'src/features/class/class.service';
@@ -92,8 +97,10 @@ describe('ClassService', () => {
       ).rejects.toThrow(new BadRequestException(ERROR_MESSAGES.CLASS_CODE_EXISTS));
     });
 
-    it('rejects a tutor id that does not exist', async () => {
-      user.userExists.mockImplementation(async (id: string) => id !== OTHER_TUTOR_ID);
+    it('rejects a tutor id that does not exist (admin assigning a tutor)', async () => {
+      user.getUserRoleById.mockImplementation(async (id: string) =>
+        id === TUTOR_ID ? { id, role: 'ADMIN' } : null,
+      );
 
       await expect(
         service.createClassService({
@@ -102,6 +109,57 @@ describe('ClassService', () => {
         }),
       ).rejects.toThrow(new BadRequestException(ERROR_MESSAGES.TUTOR_NOT_FOUND));
       expect(repo.create).not.toHaveBeenCalled();
+    });
+
+    it('lets an admin assign an existing tutor', async () => {
+      user.getUserRoleById.mockImplementation(async (id: string) => ({
+        id,
+        role: id === TUTOR_ID ? 'ADMIN' : 'TUTOR',
+      }));
+      repo.create.mockResolvedValue({ id: CLASS_ID });
+
+      await expect(
+        service.createClassService({
+          userId: TUTOR_ID,
+          data: { ...createDto, tutorId: OTHER_TUTOR_ID },
+        }),
+      ).resolves.toEqual({ id: CLASS_ID });
+    });
+
+    it.each(['STUDENT', 'PARENT'])(
+      'forbids a %s from creating a class (no self-assigned tutor privileges)',
+      async (role) => {
+        user.getUserRoleById.mockResolvedValue({ id: TUTOR_ID, role });
+
+        await expect(
+          service.createClassService({ userId: TUTOR_ID, data: createDto }),
+        ).rejects.toBeInstanceOf(ForbiddenException);
+        expect(repo.create).not.toHaveBeenCalled();
+      },
+    );
+
+    it('forbids a tutor from creating a class on behalf of another tutor', async () => {
+      await expect(
+        service.createClassService({
+          userId: TUTOR_ID,
+          data: { ...createDto, tutorId: OTHER_TUTOR_ID },
+        }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(repo.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects an admin assigning a user who is not a tutor', async () => {
+      user.getUserRoleById.mockImplementation(async (id: string) => ({
+        id,
+        role: id === TUTOR_ID ? 'ADMIN' : 'STUDENT',
+      }));
+
+      await expect(
+        service.createClassService({
+          userId: TUTOR_ID,
+          data: { ...createDto, tutorId: OTHER_TUTOR_ID },
+        }),
+      ).rejects.toThrow(new BadRequestException(ERROR_MESSAGES.TUTOR_NOT_FOUND));
     });
 
     it('maps a unique-violation race on name back to the name-exists error', async () => {
@@ -728,7 +786,7 @@ describe('ClassService', () => {
 
   describe('remaining input and existence guards', () => {
     it('createClassService rejects an acting user that does not exist', async () => {
-      user.userExists.mockResolvedValueOnce(false);
+      user.getUserRoleById.mockResolvedValueOnce(null);
 
       await expect(
         service.createClassService({ userId: TUTOR_ID, data: createDto }),

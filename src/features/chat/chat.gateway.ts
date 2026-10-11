@@ -13,9 +13,10 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { Inject } from '@nestjs/common';
 import { DRIZZLE } from '../../database/database.module';
+import { resolveJwtAccessSecret } from '../../packages/configs/jwt-sign.config';
 import { type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import { eq } from 'drizzle-orm';
-import { users } from 'src/database/schema';
+import { and, eq } from 'drizzle-orm';
+import { conversationParticipants, users } from 'src/database/schema';
 import { MessageService } from './message.service';
 import { ConversationService } from './conversation.service';
 
@@ -57,10 +58,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         return;
       }
 
-      const accessSecret =
-        this.configService.get<string>('JWT_ACCESS_SECRET') ??
-        this.configService.get<string>('JWT_SECRET') ??
-        'dev-insecure-jwt-secret';
+      const accessSecret = resolveJwtAccessSecret(this.configService);
 
       const decoded = this.jwtService.verify(token, { secret: accessSecret });
 
@@ -134,12 +132,36 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('conversation:join')
-  handleJoinConversation(
+  async handleJoinConversation(
     @ConnectedSocket() client: AuthenticatedSocket,
     @MessageBody() data: { conversationId: string },
   ) {
+    // Only participants may subscribe to a room, otherwise anyone who learns a conversation id
+    // would receive its `message:receive` broadcasts.
+    if (!client.userId || !(await this.isParticipant(data?.conversationId, client.userId))) {
+      return { event: 'conversation:error', data: { error: 'Not a participant' } };
+    }
     void client.join(data.conversationId);
     return { event: 'conversation:joined', data: { conversationId: data.conversationId } };
+  }
+
+  private async isParticipant(conversationId: string, userId: string): Promise<boolean> {
+    if (typeof conversationId !== 'string' || !conversationId) return false;
+    try {
+      const rows = await this.db
+        .select({ id: conversationParticipants.id })
+        .from(conversationParticipants)
+        .where(
+          and(
+            eq(conversationParticipants.conversationId, conversationId),
+            eq(conversationParticipants.userId, userId),
+          ),
+        )
+        .limit(1);
+      return rows.length > 0;
+    } catch {
+      return false;
+    }
   }
 
   @SubscribeMessage('conversation:leave')
@@ -156,7 +178,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: AuthenticatedSocket,
     @MessageBody() data: { conversationId: string },
   ) {
-    if (!client.userId) return;
+    // Only sockets that joined (i.e. passed the participant check) may emit into the room.
+    if (!client.userId || !client.rooms.has(data?.conversationId)) return;
     client.to(data.conversationId).emit('typing:start', {
       userId: client.userId,
       conversationId: data.conversationId,
@@ -168,7 +191,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: AuthenticatedSocket,
     @MessageBody() data: { conversationId: string },
   ) {
-    if (!client.userId) return;
+    if (!client.userId || !client.rooms.has(data?.conversationId)) return;
     client.to(data.conversationId).emit('typing:stop', {
       userId: client.userId,
       conversationId: data.conversationId,
@@ -186,7 +209,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: AuthenticatedSocket,
     @MessageBody() data: { conversationId: string; messageId: string },
   ) {
-    if (!client.userId) return;
+    if (!client.userId || !(await this.isParticipant(data?.conversationId, client.userId))) return;
 
     try {
       await this.messageService.updateMessageStatus(data.messageId, 'READ');

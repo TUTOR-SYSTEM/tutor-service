@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -63,19 +64,31 @@ export class ClassService {
     if (!userId || (userId && !checkUuidValid({ data: userId }))) {
       throw new BadRequestException(ERROR_MESSAGES.USER_ID_MUST_BE_UUID);
     }
-    if (!(await this.user.userExists(userId)))
-      throw new BadRequestException(ERROR_MESSAGES.USER_NOT_FOUND);
+    const acting = await this.user.getUserRoleById(userId);
+    if (!acting) throw new BadRequestException(ERROR_MESSAGES.USER_NOT_FOUND);
+    // Only tutors/admins may create classes; every later ownership check is `tutorId === userId`,
+    // so letting any role pick itself as tutor would hand out owner powers (roster, tuition...).
+    if (acting.role !== 'TUTOR' && acting.role !== 'ADMIN') {
+      throw new ForbiddenException(ERROR_MESSAGES.PERMISSION_DENIED);
+    }
     if (!tutorId || !checkUuidValid({ data: tutorId })) {
       throw new BadRequestException(ERROR_MESSAGES.TUTOR_ID_MUST_BE_UUID);
     }
-    const [nameExists, codeExists, tutorExists] = await Promise.all([
+    // A tutor can only create a class for themselves; assigning another tutor is admin-only.
+    if (acting.role !== 'ADMIN' && tutorId !== userId) {
+      throw new ForbiddenException(ERROR_MESSAGES.PERMISSION_DENIED);
+    }
+    const [nameExists, codeExists, tutorRow] = await Promise.all([
       this.repo.getClassByField({ field: 'name', value: name }),
       this.repo.getClassByField({ field: 'code', value: code }),
-      this.user.userExists(tutorId),
+      tutorId === userId ? Promise.resolve(acting) : this.user.getUserRoleById(tutorId),
     ]);
     if (nameExists) throw new BadRequestException(ERROR_MESSAGES.CLASS_NAME_EXISTS);
     if (codeExists) throw new BadRequestException(ERROR_MESSAGES.CLASS_CODE_EXISTS);
-    if (!tutorExists) throw new BadRequestException(ERROR_MESSAGES.TUTOR_NOT_FOUND);
+    if (!tutorRow) throw new BadRequestException(ERROR_MESSAGES.TUTOR_NOT_FOUND);
+    if (tutorRow.role !== 'TUTOR' && tutorRow.role !== 'ADMIN') {
+      throw new BadRequestException(ERROR_MESSAGES.TUTOR_NOT_FOUND);
+    }
 
     try {
       return await this.repo.create({ data });

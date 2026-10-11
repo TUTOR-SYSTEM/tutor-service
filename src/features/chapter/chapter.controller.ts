@@ -8,7 +8,7 @@ import {
   ApiParam,
   ApiQuery,
 } from '@nestjs/swagger';
-import { ApiResponse } from '@packages/decorators';
+import { ApiResponse, CurrentUser } from '@packages/decorators';
 import { StatusCodes } from 'http-status-codes';
 import {
   type CreateChapterDto,
@@ -45,10 +45,15 @@ export class ChapterController {
   @SwaggerResponse({ status: StatusCodes.CREATED, description: 'Chapter created' })
   @ApiResponse({ statusCode: StatusCodes.CREATED, message: 'Create chapter successfully' })
   async createChapterController(
+    @CurrentUser() user: Record<string, string>,
     @Param('curriculumId') curriculumId: string,
     @Body(new ZodValidationPipe<CreateChapterDto>(createChapterSchema)) data: CreateChapterDto,
   ) {
-    return await this.chapterService.createChapterService({ curriculumId, data });
+    return await this.chapterService.createChapterService({
+      userId: user.id,
+      curriculumId,
+      data,
+    });
   }
 
   @Get('')
@@ -93,10 +98,11 @@ export class ChapterController {
   @SwaggerResponse({ status: StatusCodes.OK, description: 'Update chapter' })
   @ApiResponse({ statusCode: StatusCodes.OK, message: 'Update chapter successfully' })
   async updateChapterController(
+    @CurrentUser() user: Record<string, string>,
     @Param('id') id: string,
     @Body(new ZodValidationPipe<UpdateChapterDto>(updateChapterSchema)) data: UpdateChapterDto,
   ) {
-    return await this.chapterService.updateChapterService({ id, data });
+    return await this.chapterService.updateChapterService({ userId: user.id, id, data });
   }
 
   @Delete(':id')
@@ -105,7 +111,10 @@ export class ChapterController {
   @ApiParam({ name: 'id', description: 'Chapter ID', type: 'string' })
   @SwaggerResponse({ status: StatusCodes.OK, description: 'Delete chapter' })
   @ApiResponse({ statusCode: StatusCodes.OK, message: 'Delete chapter successfully' })
-  async deleteChapterController(@Param('id') id: string) {
-    return await this.chapterService.deleteChapterService({ id });
+  async deleteChapterController(
+    @CurrentUser() user: Record<string, string>,
+    @Param('id') id: string,
+  ) {
+    return await this.chapterService.deleteChapterService({ userId: user.id, id });
   }
 }

@@ -21,11 +21,14 @@ export const dayOfWeeks = [
 ] as const;
 export const sessionFormatEnum = z.enum(['ONLINE', 'OFFLINE']);
 
+// 00:00–23:59 (the old /^\d{2}:\d{2}$/ accepted "99:99").
+const timeOfDay = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Invalid time format (HH:mm)');
+
 export const createScheduleSchema = z.object({
   classId: z.string().uuid('Invalid class ID'),
   dayOfWeek: dayOfWeekEnum,
-  startTime: z.string().regex(/^\d{2}:\d{2}$/, 'Invalid time format (HH:mm)'),
-  endTime: z.string().regex(/^\d{2}:\d{2}$/, 'Invalid time format (HH:mm)'),
+  startTime: timeOfDay,
+  endTime: timeOfDay,
   format: sessionFormatEnum.default('ONLINE'),
   location: z.string().optional(),
 });
@@ -36,8 +39,8 @@ export const createSchedulesSchema = z.object({
     .array(
       z.object({
         dayOfWeek: dayOfWeekEnum,
-        startTime: z.string().regex(/^\d{2}:\d{2}$/, 'Invalid time format (HH:mm)'),
-        endTime: z.string().regex(/^\d{2}:\d{2}$/, 'Invalid time format (HH:mm)'),
+        startTime: timeOfDay,
+        endTime: timeOfDay,
         format: sessionFormatEnum.default('ONLINE'),
         location: z.string().optional(),
       }),
@@ -53,4 +56,8 @@ export const getSchedulesSchema = z.object({
   classId: z.string().uuid('Invalid class ID').optional(),
 });
 
-export const updateScheduleSchema = createScheduleSchema.partial().omit({ classId: true });
+// `format` is redeclared without a default, otherwise `.partial()` resets it to ONLINE.
+export const updateScheduleSchema = createScheduleSchema
+  .partial()
+  .omit({ classId: true })
+  .extend({ format: sessionFormatEnum.optional() });

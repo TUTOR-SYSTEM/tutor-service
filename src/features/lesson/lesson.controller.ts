@@ -8,7 +8,7 @@ import {
   ApiParam,
   ApiQuery,
 } from '@nestjs/swagger';
-import { ApiResponse } from '@packages/decorators';
+import { ApiResponse, CurrentUser } from '@packages/decorators';
 import { StatusCodes } from 'http-status-codes';
 import {
   type CreateLessonBodyDto,
@@ -75,12 +75,18 @@ export class LessonController {
   @SwaggerResponse({ status: StatusCodes.CREATED, description: 'Lesson created' })
   @ApiResponse({ statusCode: StatusCodes.CREATED, message: 'Create lesson successfully' })
   async createLessonController(
+    @CurrentUser() user: Record<string, string>,
     @Query('curriculumId') curriculumId: string,
     @Query('chapterId') chapterId: string | undefined,
     @Body(new ZodValidationPipe<CreateLessonBodyDto>(createLessonBodySchema))
     data: CreateLessonBodyDto,
   ) {
-    return await this.lessonService.createLessonService({ curriculumId, chapterId, data });
+    return await this.lessonService.createLessonService({
+      userId: user.id,
+      curriculumId,
+      chapterId,
+      data,
+    });
   }
 
   @Get('')
@@ -115,10 +121,11 @@ export class LessonController {
   @SwaggerResponse({ status: StatusCodes.OK, description: 'Update lesson' })
   @ApiResponse({ statusCode: StatusCodes.OK, message: 'Update lesson successfully' })
   async updateLessonController(
+    @CurrentUser() user: Record<string, string>,
     @Param('id') id: string,
     @Body(new ZodValidationPipe<UpdateLessonDto>(updateLessonSchema)) data: UpdateLessonDto,
   ) {
-    return await this.lessonService.updateLessonService({ id, data });
+    return await this.lessonService.updateLessonService({ userId: user.id, id, data });
   }
 
   @Delete(':id')
@@ -127,7 +134,10 @@ export class LessonController {
   @ApiParam({ name: 'id', description: 'Lesson ID', type: 'string' })
   @SwaggerResponse({ status: StatusCodes.OK, description: 'Delete lesson' })
   @ApiResponse({ statusCode: StatusCodes.OK, message: 'Delete lesson successfully' })
-  async deleteLessonController(@Param('id') id: string) {
-    return await this.lessonService.deleteLessonService({ id });
+  async deleteLessonController(
+    @CurrentUser() user: Record<string, string>,
+    @Param('id') id: string,
+  ) {
+    return await this.lessonService.deleteLessonService({ userId: user.id, id });
   }
 }

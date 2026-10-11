@@ -44,7 +44,11 @@ export const createChapterSchema = z.object({
   order: z.coerce.number().int().default(0).optional(),
 });
 
-export const updateChapterSchema = createChapterSchema.partial();
+// `order` is redeclared without a default: `.partial()` keeps `.default(0)` and would reset the
+// ordering on every update that doesn't send it.
+export const updateChapterSchema = createChapterSchema
+  .partial()
+  .extend({ order: z.coerce.number().int().optional() });
 
 export const createLessonSchema = z.object({
   title: z
@@ -59,7 +63,9 @@ export const createLessonSchema = z.object({
   order: z.coerce.number().int().default(0).optional(),
 });
 
-export const updateLessonSchema = createLessonSchema.partial();
+export const updateLessonSchema = createLessonSchema
+  .partial()
+  .extend({ order: z.coerce.number().int().optional() });
 
 export const createLessonBodySchema = createLessonSchema.omit({
   curriculumId: true,

@@ -70,12 +70,28 @@ export class ExerciseService {
     if (data.studentId !== userId && data.tutorId !== userId) {
       throw new ForbiddenException(ERROR_MESSAGES.EXERCISE_SUBMIT_NOT_ALLOWED);
     }
+    // A user must not be both sides of a submission, otherwise they could create a row and then
+    // grade it themselves (`grade` only checks `tutorId === userId`).
+    if (data.studentId === data.tutorId) {
+      throw new ForbiddenException(ERROR_MESSAGES.EXERCISE_SUBMIT_NOT_ALLOWED);
+    }
 
     await Promise.all([
       this.assertUserExists(data.tutorId, 'Tutor'),
       this.assertUserExists(data.studentId, 'Student'),
     ]);
     await this.resolveRefs({ userId, sessionId: data.sessionId, lessonId: data.lessonId });
+
+    // The grader must be the tutor of the session's class, not whoever the caller names.
+    if (data.sessionId) {
+      const session = await this.sessionService.getSessionService({
+        userId,
+        id: data.sessionId,
+      });
+      if (session.class?.tutorId !== data.tutorId) {
+        throw new ForbiddenException(ERROR_MESSAGES.EXERCISE_SUBMIT_NOT_ALLOWED);
+      }
+    }
 
     // one submission per (student, session) — resubmits go through the submit endpoint
     if (data.sessionId) {

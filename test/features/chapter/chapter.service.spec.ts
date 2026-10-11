@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ERROR_MESSAGES } from 'src/data/constants';
 import { ChapterService } from 'src/features/chapter/chapter.service';
 import { ChapterRepository } from 'src/features/chapter/chapter.repository';
+import { CurriculumRepository } from 'src/features/curriculum/curriculum.repository';
 import { DRIZZLE } from 'src/database/database.module';
 
 // the chapter repository pulls drizzle + an ESM-only transitive dep (uuid) that jest cannot parse;
@@ -10,13 +11,19 @@ import { DRIZZLE } from 'src/database/database.module';
 jest.mock('src/features/chapter/chapter.repository', () => ({
   ChapterRepository: class ChapterRepository {},
 }));
+jest.mock('src/features/curriculum/curriculum.repository', () => ({
+  CurriculumRepository: class CurriculumRepository {},
+}));
 
 const CURRICULUM_ID = '11111111-1111-4111-8111-111111111111';
 const CHAPTER_ID = '22222222-2222-4222-8222-222222222222';
+const OWNER_ID = '44444444-4444-4444-8444-444444444444';
+const OTHER_ID = '55555555-5555-4555-8555-555555555555';
 
 describe('ChapterService', () => {
   let service: ChapterService;
   let repo: Record<string, jest.Mock>;
+  let curriculumRepo: Record<string, jest.Mock>;
 
   beforeEach(async () => {
     repo = {
@@ -26,11 +33,16 @@ describe('ChapterService', () => {
       update: jest.fn(),
       delete: jest.fn(),
     };
+    // the curriculum is owned by OWNER_ID unless a test says otherwise
+    curriculumRepo = {
+      findById: jest.fn().mockResolvedValue({ id: CURRICULUM_ID, userId: OWNER_ID }),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ChapterService,
         { provide: ChapterRepository, useValue: repo },
+        { provide: CurriculumRepository, useValue: curriculumRepo },
         { provide: DRIZZLE, useValue: {} },
       ],
     }).compile();
@@ -43,6 +55,7 @@ describe('ChapterService', () => {
       repo.create.mockResolvedValue({ id: CHAPTER_ID });
 
       const result = await service.createChapterService({
+        userId: OWNER_ID,
         curriculumId: CURRICULUM_ID,
         data: { name: 'Ch1' } as never,
       });
@@ -56,8 +69,43 @@ describe('ChapterService', () => {
 
     it('rejects a non-UUID curriculumId without inserting', async () => {
       await expect(
-        service.createChapterService({ curriculumId: 'nope', data: {} as never }),
+        service.createChapterService({ userId: OWNER_ID, curriculumId: 'nope', data: {} as never }),
       ).rejects.toThrow(new BadRequestException(ERROR_MESSAGES.CURRICULUM_ID_MUST_BE_UUID));
+      expect(repo.create).not.toHaveBeenCalled();
+    });
+
+    it('returns NotFound when the curriculum belongs to someone else', async () => {
+      await expect(
+        service.createChapterService({
+          userId: OTHER_ID,
+          curriculumId: CURRICULUM_ID,
+          data: {} as never,
+        }),
+      ).rejects.toThrow(new NotFoundException(ERROR_MESSAGES.CURRICULUM_NOT_FOUND));
+      expect(repo.create).not.toHaveBeenCalled();
+    });
+
+    it('returns NotFound when the curriculum does not exist', async () => {
+      curriculumRepo.findById.mockResolvedValue(undefined);
+
+      await expect(
+        service.createChapterService({
+          userId: OWNER_ID,
+          curriculumId: CURRICULUM_ID,
+          data: {} as never,
+        }),
+      ).rejects.toThrow(NotFoundException);
+      expect(repo.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a missing/invalid acting userId', async () => {
+      await expect(
+        service.createChapterService({
+          userId: '',
+          curriculumId: CURRICULUM_ID,
+          data: {} as never,
+        }),
+      ).rejects.toThrow(new BadRequestException(ERROR_MESSAGES.USER_ID_MUST_BE_UUID));
       expect(repo.create).not.toHaveBeenCalled();
     });
   });
@@ -104,11 +152,15 @@ describe('ChapterService', () => {
 
   describe('updateChapterService', () => {
     it('updates an existing chapter', async () => {
-      repo.findById.mockResolvedValue({ id: CHAPTER_ID });
+      repo.findById.mockResolvedValue({ id: CHAPTER_ID, curriculumId: CURRICULUM_ID });
       repo.update.mockResolvedValue({ id: CHAPTER_ID, name: 'New' });
 
       await expect(
-        service.updateChapterService({ id: CHAPTER_ID, data: { name: 'New' } as never }),
+        service.updateChapterService({
+          userId: OWNER_ID,
+          id: CHAPTER_ID,
+          data: { name: 'New' } as never,
+        }),
       ).resolves.toEqual({ id: CHAPTER_ID, name: 'New' });
       expect(repo.update).toHaveBeenCalledWith(CHAPTER_ID, { name: 'New' });
     });
@@ -117,41 +169,61 @@ describe('ChapterService', () => {
       repo.findById.mockResolvedValue(undefined);
 
       await expect(
-        service.updateChapterService({ id: CHAPTER_ID, data: {} as never }),
+        service.updateChapterService({ userId: OWNER_ID, id: CHAPTER_ID, data: {} as never }),
       ).rejects.toThrow(new NotFoundException(ERROR_MESSAGES.CHAPTER_NOT_FOUND));
       expect(repo.update).not.toHaveBeenCalled();
     });
 
+    it("returns NotFound and skips the update when the curriculum isn't the caller's", async () => {
+      repo.findById.mockResolvedValue({ id: CHAPTER_ID, curriculumId: CURRICULUM_ID });
+
+      await expect(
+        service.updateChapterService({ userId: OTHER_ID, id: CHAPTER_ID, data: {} as never }),
+      ).rejects.toThrow(new NotFoundException(ERROR_MESSAGES.CURRICULUM_NOT_FOUND));
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
     it('rejects a non-UUID id before looking anything up', async () => {
-      await expect(service.updateChapterService({ id: '', data: {} as never })).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(
+        service.updateChapterService({ userId: OWNER_ID, id: '', data: {} as never }),
+      ).rejects.toThrow(BadRequestException);
       expect(repo.findById).not.toHaveBeenCalled();
     });
   });
 
   describe('deleteChapterService', () => {
     it('deletes an existing chapter', async () => {
-      repo.findById.mockResolvedValue({ id: CHAPTER_ID });
+      repo.findById.mockResolvedValue({ id: CHAPTER_ID, curriculumId: CURRICULUM_ID });
       repo.delete.mockResolvedValue({ id: CHAPTER_ID });
 
-      await expect(service.deleteChapterService({ id: CHAPTER_ID })).resolves.toEqual({
-        id: CHAPTER_ID,
-      });
+      await expect(
+        service.deleteChapterService({ userId: OWNER_ID, id: CHAPTER_ID }),
+      ).resolves.toEqual({ id: CHAPTER_ID });
       expect(repo.delete).toHaveBeenCalledWith(CHAPTER_ID);
     });
 
     it('returns NotFound and does not delete a missing chapter', async () => {
       repo.findById.mockResolvedValue(null);
 
-      await expect(service.deleteChapterService({ id: CHAPTER_ID })).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(
+        service.deleteChapterService({ userId: OWNER_ID, id: CHAPTER_ID }),
+      ).rejects.toThrow(NotFoundException);
+      expect(repo.delete).not.toHaveBeenCalled();
+    });
+
+    it("does not delete a chapter of a curriculum the caller doesn't own", async () => {
+      repo.findById.mockResolvedValue({ id: CHAPTER_ID, curriculumId: CURRICULUM_ID });
+
+      await expect(
+        service.deleteChapterService({ userId: OTHER_ID, id: CHAPTER_ID }),
+      ).rejects.toThrow(NotFoundException);
       expect(repo.delete).not.toHaveBeenCalled();
     });
 
     it('rejects a non-UUID id', async () => {
-      await expect(service.deleteChapterService({ id: 'x' })).rejects.toThrow(BadRequestException);
+      await expect(service.deleteChapterService({ userId: OWNER_ID, id: 'x' })).rejects.toThrow(
+        BadRequestException,
+      );
     });
   });
 });

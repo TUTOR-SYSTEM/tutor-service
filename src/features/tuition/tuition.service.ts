@@ -55,7 +55,10 @@ export class TuitionService {
     if (owner.tutorId !== tutorId) {
       throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
     }
-    const updated = await this.repo.update(id, dto);
+    // Dashboard revenue is bucketed by `paidDate`, so marking PAID without one would make the
+    // payment vanish from the reports. Stamp it now unless the caller sent a date (or null).
+    const data = dto.status === 'PAID' && dto.paidDate === undefined ? { ...dto, paidDate: new Date() } : dto;
+    const updated = await this.repo.update(id, data);
     return updated;
   }
 

@@ -105,7 +105,10 @@ export class CurriculumService {
     if (!(await this.userService.userExists(userId)))
       throw new BadRequestException(ERROR_MESSAGES.USER_NOT_FOUND);
     const existing = await this.curriculumRepository.findById(id);
-    if (!existing) throw new NotFoundException(ERROR_MESSAGES.CURRICULUM_NOT_FOUND);
+    // 404 (not 403) for someone else's curriculum, same as class/session ownership checks.
+    if (!existing || existing.userId !== userId) {
+      throw new NotFoundException(ERROR_MESSAGES.CURRICULUM_NOT_FOUND);
+    }
 
     return await this.curriculumRepository.update(id, data);
   }
@@ -121,7 +124,9 @@ export class CurriculumService {
     if (!(await this.userService.userExists(userId)))
       throw new BadRequestException(ERROR_MESSAGES.USER_NOT_FOUND);
     const existing = await this.curriculumRepository.findById(id);
-    if (!existing) throw new NotFoundException(ERROR_MESSAGES.CURRICULUM_NOT_FOUND);
+    if (!existing || existing.userId !== userId) {
+      throw new NotFoundException(ERROR_MESSAGES.CURRICULUM_NOT_FOUND);
+    }
 
     return await this.curriculumRepository.delete(id);
   }

@@ -22,7 +22,11 @@ Zod v4. Export:
   Coerce numbers/dates with `z.coerce.number()` / `z.coerce.date()`; UUID FKs with
   `.uuid('Invalid tutor ID')`.
 - `updateFooSchema = createFooSchema.partial()` (`.omit({ ... })` any immutable field, as
-  `class.schema.ts` omits `tutorId`).
+  `class.schema.ts` omits `tutorId`). **Zod 4 `.partial()` keeps `.default(...)`**, so for every
+  create field that has a default, re-declare it without one:
+  `.partial().omit({ ... }).extend({ status: fooStatusEnum.optional() })` — otherwise an update
+  that omits the field overwrites it with the default (see `updateClassSchema` /
+  `updateTuitionSchema`). Clearable dates: `z.coerce.date().nullable().optional()`.
 - `getFoosQuerySchema = z.object({ ... })` — plain `z.coerce` pagination, copy the shape from
   `class.schema.ts`:
   ```ts

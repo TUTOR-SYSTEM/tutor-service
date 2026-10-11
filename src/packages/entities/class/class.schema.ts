@@ -32,10 +32,17 @@ export const createClassSchema = z.object({
     .default([]),
 });
 
+// `.partial()` keeps the `.default(...)` of wrapped fields, so an update that omits `tuition`,
+// `status`, `format` or `schedulesId` would overwrite them with the defaults. Redeclare them
+// without a default so "absent" really means "unchanged".
 export const updateClassSchema = createClassSchema
   .partial()
   .omit({ tutorId: true })
   .extend({
+    tuition: z.coerce.number().min(0).optional(),
+    status: classStatusEnum.optional(),
+    format: sessionFormatEnum.optional(),
+    schedulesId: z.array(z.string().uuid({ message: 'Schedules Id must be uuid ...' })).optional(),
     studentIds: z.array(z.string().uuid('Invalid student ID')).max(100).optional(),
   });
 

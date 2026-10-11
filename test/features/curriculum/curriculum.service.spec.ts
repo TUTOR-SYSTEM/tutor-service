@@ -131,8 +131,26 @@ describe('CurriculumService', () => {
   });
 
   describe('updateCurriculumService / deleteCurriculumService', () => {
+    it("returns NotFound and skips the update for someone else's curriculum", async () => {
+      repo.findById.mockResolvedValue({ id: CURRICULUM_ID, userId: 'someone-else' });
+
+      await expect(
+        service.updateCurriculumService({ userId: USER_ID, id: CURRICULUM_ID, data: {} as never }),
+      ).rejects.toThrow(new NotFoundException(ERROR_MESSAGES.CURRICULUM_NOT_FOUND));
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it("returns NotFound and skips the delete for someone else's curriculum", async () => {
+      repo.findById.mockResolvedValue({ id: CURRICULUM_ID, userId: 'someone-else' });
+
+      await expect(
+        service.deleteCurriculumService({ userId: USER_ID, id: CURRICULUM_ID }),
+      ).rejects.toThrow(new NotFoundException(ERROR_MESSAGES.CURRICULUM_NOT_FOUND));
+      expect(repo.delete).not.toHaveBeenCalled();
+    });
+
     it('updates an existing curriculum', async () => {
-      repo.findById.mockResolvedValue({ id: CURRICULUM_ID });
+      repo.findById.mockResolvedValue({ id: CURRICULUM_ID, userId: USER_ID });
       repo.update.mockResolvedValue({ id: CURRICULUM_ID, subject: 'Physics' });
 
       await expect(
@@ -154,7 +172,7 @@ describe('CurriculumService', () => {
     });
 
     it('deletes an existing curriculum', async () => {
-      repo.findById.mockResolvedValue({ id: CURRICULUM_ID });
+      repo.findById.mockResolvedValue({ id: CURRICULUM_ID, userId: USER_ID });
       repo.delete.mockResolvedValue({ id: CURRICULUM_ID });
 
       await expect(

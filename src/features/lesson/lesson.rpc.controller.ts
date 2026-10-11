@@ -19,7 +19,12 @@ export class LessonRpcController {
   @MessagePattern('lesson.create')
   create(
     @Payload()
-    payload: { curriculumId: string; chapterId?: string | null; data: CreateLessonBodyDto },
+    payload: {
+      userId: string;
+      curriculumId: string;
+      chapterId?: string | null;
+      data: CreateLessonBodyDto;
+    },
   ) {
     return this.lessonService.createLessonService(payload);
   }
@@ -35,12 +40,12 @@ export class LessonRpcController {
   }
 
   @MessagePattern('lesson.update')
-  update(@Payload() payload: { id: string; data: UpdateLessonDto }) {
+  update(@Payload() payload: { userId: string; id: string; data: UpdateLessonDto }) {
     return this.lessonService.updateLessonService(payload);
   }
 
   @MessagePattern('lesson.delete')
-  del(@Payload() payload: { id: string }) {
+  del(@Payload() payload: { userId: string; id: string }) {
     return this.lessonService.deleteLessonService(payload);
   }
 }

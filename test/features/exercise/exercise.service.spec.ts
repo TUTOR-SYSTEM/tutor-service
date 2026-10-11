@@ -49,7 +49,12 @@ describe('ExerciseService', () => {
       update: jest.fn(),
     };
     userService = { userExists: jest.fn().mockResolvedValue(true) };
-    sessionService = { getSessionService: jest.fn().mockResolvedValue({ id: SESSION_ID }) };
+    // the session's class is taught by TUTOR_ID (the grader named in `baseCreate`)
+    sessionService = {
+      getSessionService: jest
+        .fn()
+        .mockResolvedValue({ id: SESSION_ID, class: { tutorId: TUTOR_ID } }),
+    };
     lessonService = { getLessonByIdService: jest.fn().mockResolvedValue({ id: LESSON_ID }) };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -91,6 +96,28 @@ describe('ExerciseService', () => {
     it('forbids a third party from submitting on behalf of someone else', async () => {
       await expect(
         service.createExerciseService({ userId: OTHER_ID, data: baseCreate as never }),
+      ).rejects.toThrow(new ForbiddenException(ERROR_MESSAGES.EXERCISE_SUBMIT_NOT_ALLOWED));
+      expect(repo.create).not.toHaveBeenCalled();
+    });
+
+    it('forbids one user from being both student and tutor (self-grading)', async () => {
+      await expect(
+        service.createExerciseService({
+          userId: STUDENT_ID,
+          data: { ...baseCreate, tutorId: STUDENT_ID } as never,
+        }),
+      ).rejects.toThrow(new ForbiddenException(ERROR_MESSAGES.EXERCISE_SUBMIT_NOT_ALLOWED));
+      expect(repo.create).not.toHaveBeenCalled();
+    });
+
+    it("forbids naming a tutor who doesn't teach the session's class", async () => {
+      sessionService.getSessionService.mockResolvedValue({
+        id: SESSION_ID,
+        class: { tutorId: OTHER_ID },
+      });
+
+      await expect(
+        service.createExerciseService({ userId: STUDENT_ID, data: baseCreate as never }),
       ).rejects.toThrow(new ForbiddenException(ERROR_MESSAGES.EXERCISE_SUBMIT_NOT_ALLOWED));
       expect(repo.create).not.toHaveBeenCalled();
     });
