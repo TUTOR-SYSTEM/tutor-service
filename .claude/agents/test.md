@@ -62,8 +62,14 @@ bun run test:debug        # node --inspect-brk into Jest, --runInBand
 - Create `*.spec.ts` files in `test/` directory
 - Mirror source structure: `src/features/class/class.service.ts` → `test/features/class/class.service.spec.ts`
 - Use Jest (`@nestjs/testing` or plain `jest.fn()` mocks) — not `bun:test`
-- Mock injected sibling services (e.g. `UserService`, `LessonService`) but NOT the database for
-  integration-style tests
+- Mock injected sibling services (e.g. `UserService`, `LessonService`)
+- Repository specs (`test/features/<name>/<name>.repository.spec.ts`) construct the repository
+  directly with `createDrizzleMock()` from `test/support/drizzle.mock.ts`: a chainable `db` where
+  each `await` pops the next value from `db.queue(...)` (one entry per query, in order).
+  Assert filters with `renderSql(lastWhere(db))` — use the **outer** where (`lastWhere`), not
+  `db.where.mock.calls[0]`, because subqueries are built first. Subqueries render as opaque
+  params under the mock, so assert them via `db.select` calls instead of SQL text. Real table SQL
+  names differ from the TS names (`exercises`, `class_sessions`, `tuitions`).
 - Test both success and error paths
 - Use descriptive test names
 
@@ -128,8 +134,11 @@ describe('ClassService', () => {
 ## Coverage
 
 - Coverage provider: Jest's built-in `--coverage` (no separate `c8`/`vitest` config)
-- Coverage directories: `src/` (source code)
 - Run `bun run test:cov` to generate a coverage report
+- **Coverage is under-reported by default**: `jest.config.js` has `roots: ['<rootDir>/test']`, so
+  Jest only counts src files that some test loads (42 of 163 at last measure) and the summary
+  looks like ~97%. Honest number (all of `src/`, measured 2026-10-11): ~46.9% statements.
+  To measure honestly, pass `--roots='<rootDir>/test' --roots='<rootDir>/src'` on the CLI.
 
 ## Common Issues
 

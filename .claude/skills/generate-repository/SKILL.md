@@ -61,6 +61,13 @@ A child of `class` (e.g. `schedule`) has no owner column of its own, so it skips
 - `getByParent({ parentId })` → `.where(eq(foos.parentId, parentId)).orderBy(...)`, return all rows.
 - `getById({ id })`, `update({ id, data })`, `del({ id })` as usual.
 
+## Unit test
+Put it in `test/features/{name}/{name}.repository.spec.ts`. Construct the repo directly with
+`createDrizzleMock()` from `test/support/drizzle.mock.ts`, queue one result per awaited query
+(`db.queue(rows)`), and assert filters with `renderSql(lastWhere(db))`. See
+`test/features/schedule/schedule.repository.spec.ts` as the reference.
+
 ## Rules
 - Never inline SQL string building — reuse `buildListWhereClause` from `@packages/helpers`.
+- Convert RPC date strings with `toDate()` on every insert/update (see `database.md`).
 - Map camelCase DTO fields to columns explicitly on insert; stringify `numeric` columns.

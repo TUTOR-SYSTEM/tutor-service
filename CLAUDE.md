@@ -101,28 +101,10 @@ bun podman:up / podman:down / podman:logs
 
 ## Project Structure
 
-```
-src/
-├── main.ts                       # Bootstrap: CORS, interceptors, filters, RMQ listener (tutor_queue), listen
-├── app.module.ts                 # Root module (imports all feature modules)
-├── app.controller.ts / app.service.ts   # Health-check
-├── database/
-│   └── database.module.ts        # Global Drizzle ORM provider (postgres.js) — schema imported
-│                                  # from `@tutor/gateway/schema` (../gateway, canonical since
-│                                  # 2026-09-28); no local schema.ts/drizzle.config.ts anymore.
-│                                  # Real tables owned by this repo: classes, class_students,
-│                                  # schedules, class_sessions, curriculums, chapters, lessons,
-│                                  # tuitions, student_scores, ai_messages, attendances,
-│                                  # exercises, conversations, conversation_participants,
-│                                  # messages (users/grades owned by `user`; notifications
-│                                  # owned by `third-service` — imported from the same shared
-│                                  # schema package but this repo doesn't query them)
-├── features/                     # class, schedule, session, curriculum, chapter, lesson, tuition,
-│                                  # exercise, attendance, chat, report, dashboard, agents, user
-└── packages/                     # Shared utilities (import via @packages/*)
-    ├── configs/ decorators/ entities/ filters/ guards/ helpers/ interceptor/ interfaces/
-    │   pipes/ strategy/  — same shape as `user`/`gateway`
-```
+Gotchas:
+- No local `schema.ts` or `drizzle.config.ts`: the schema is imported from `@tutor/gateway/schema` (`../gateway`, canonical since 2026-09-28).
+- Tables this repo owns: classes, class_students, schedules, class_sessions, curriculums, chapters, lessons, tuitions, student_scores, ai_messages, attendances, exercises, conversations, conversation_participants, messages. `users`/`grades` belong to `user`; `notifications` belongs to `third-service`.
+- `features/` covers class, schedule, session, curriculum, chapter, lesson, tuition, exercise, attendance, chat, report, dashboard, agents, user.
 
 ## Code Conventions
 

@@ -1,5 +1,13 @@
 # Rule: Database & migrations
 
+- **RPC dates must be converted before a write**: RPC payloads are JSON, so `Date` fields arrive
+  as ISO strings. Drizzle's `timestamp` columns call `value.toISOString()` on write, so a raw
+  string throws `TypeError: value.toISOString is not a function`. Wrap every date field of an
+  insert/update with `toDate()` from `@packages/helpers/date.helper` (`create` in
+  `SessionRepository`/`ClassRepository`/`TuitionRepository` already do; keep `update` in step —
+  `TuitionRepository.update` currently does not, see the failing test in
+  `test/features/tuition/tuition.repository.spec.ts`).
+
 - **2026-09-28 schema consolidation**: `src/database/schema.ts` + `drizzle.config.ts` +
   `drizzle/` no longer live in this repo — they moved to `../gateway`, which is now the
   canonical owner of the schema + migration tooling for the shared Postgres DB. This repo
@@ -21,3 +29,8 @@
   defaults to implicit `any`, which then makes any `conditions` array holding it `any[]` and
   trips `@typescript-eslint/no-unsafe-argument` the moment it's spread into `and(...conditions)`.
   See `ClassRepository.getClasses` for the reference shape.
+- Drizzle's `and(...)` / `or(...)` accept `undefined` entries and drop them, so a list query that
+  always has a base access condition needs no `conditions.length > 0 ? ... : undefined` ternary:
+  type the array as `(SQL | undefined)[]` and write `const where = and(...conditions);`. Such a
+  ternary or an `if (access)` guard around an always-defined condition creates a branch no test
+  can reach. See `TuitionRepository.findAll`.

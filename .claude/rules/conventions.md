@@ -14,6 +14,9 @@
   `RolesGuard` from `@packages/guards`) for admin-only ones. `AdminRoleGuard` is also available
   in `@packages/guards`. Read the acting user with `@CurrentUser()` from `@packages/decorators`
   (returns the JWT payload; use `user.id`).
+- **Date helper** (`@packages/helpers/date.helper`): `toDate(value)` turns an ISO string into a
+  `Date` (passes `Date`/`null`/`undefined` through). Use it on every date field of an insert/update
+  that comes from an RPC payload — see `database.md`.
 - **Helpers** (`@packages/helpers`): `checkUuidValid` / `generateCode` (from `generate.helper`),
   `hashData` / `compareData` (bcrypt from `hashingData.helper`), `buildListWhereClause` (for
   paginated list queries), `signAccessToken` / `signRefreshToken` (from `jwt.helper`).
