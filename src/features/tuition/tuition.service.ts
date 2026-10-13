@@ -21,6 +21,12 @@ export class TuitionService {
     if ((await this.repo.getClassTutorId(dto.classId)) !== tutorId) {
       throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
     }
+    // the tuition must belong to a student actually enrolled in this tutor's class; otherwise the
+    // response would expose the profile (phone, avatar) of an arbitrary user
+    if (!dto.studentId || !checkUuidValid({ data: dto.studentId }))
+      throw new BadRequestException(ERROR_MESSAGES.USER_ID_MUST_BE_UUID);
+    if (!(await this.repo.isStudentEnrolled({ classId: dto.classId, studentId: dto.studentId })))
+      throw new BadRequestException(ERROR_MESSAGES.STUDENT_NOT_IN_CLASS);
     const result = await this.repo.create(dto);
     return result;
   }
@@ -57,7 +63,9 @@ export class TuitionService {
     }
     // Dashboard revenue is bucketed by `paidDate`, so marking PAID without one would make the
     // payment vanish from the reports. Stamp it now unless the caller sent a date (or null).
-    const data = dto.status === 'PAID' && dto.paidDate === undefined ? { ...dto, paidDate: new Date() } : dto;
+    // only the transition into PAID stamps the date: re-saving an already-PAID record keeps it
+    const becamePaid = dto.status === 'PAID' && owner.status !== 'PAID';
+    const data = becamePaid && dto.paidDate === undefined ? { ...dto, paidDate: new Date() } : dto;
     const updated = await this.repo.update(id, data);
     return updated;
   }

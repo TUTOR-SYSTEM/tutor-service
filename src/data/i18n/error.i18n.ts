@@ -126,6 +126,14 @@ export const ERROR_TRANSLATIONS = {
   CLASS_NAME_EXISTS: { vi: 'Tên lớp học đã tồn tại', en: 'Class name already exists' },
   CLASS_CODE_EXISTS: { vi: 'Mã lớp học đã tồn tại', en: 'Class code already exists' },
   CLASS_NOT_FOUND: { vi: 'Không tìm thấy lớp học', en: 'Class not found' },
+  CLASS_HAS_TUITION_HISTORY: {
+    vi: 'Lớp còn lịch sử học phí, không thể xoá',
+    en: 'Class still has tuition records and cannot be deleted',
+  },
+  STUDENT_NOT_IN_CLASS: {
+    vi: 'Học sinh chưa ghi danh vào lớp này',
+    en: 'Student is not enrolled in this class',
+  },
   USER_NOT_EXIST: { vi: 'Người dùng không tồn tại', en: 'User does not exist' },
   TUTOR_NOT_FOUND: { vi: 'Không tìm thấy gia sư', en: 'Tutor not found' },
   STUDENT_NOT_FOUND: { vi: 'Không tìm thấy học sinh', en: 'Student not found' },

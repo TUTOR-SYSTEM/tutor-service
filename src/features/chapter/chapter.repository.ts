@@ -3,12 +3,21 @@ import { DRIZZLE } from 'src/database/database.module';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { v4 as uuidv4 } from 'uuid';
 import { type CreateChapterDto, type UpdateChapterDto } from '@packages/entities';
-import { chapters } from 'src/database/schema';
+import { chapters, curriculums } from 'src/database/schema';
 import { count, eq } from 'drizzle-orm';
 
 @Injectable()
 export class ChapterRepository {
   constructor(@Inject(DRIZZLE) private readonly db: ReturnType<typeof drizzle>) {}
+
+  async curriculumExists(id: string): Promise<boolean> {
+    const [curriculum] = await this.db
+      .select({ id: curriculums.id })
+      .from(curriculums)
+      .where(eq(curriculums.id, id))
+      .limit(1);
+    return !!curriculum;
+  }
 
   async create({ curriculumId, data }: { curriculumId: string; data: CreateChapterDto }) {
     const [chapter] = await this.db

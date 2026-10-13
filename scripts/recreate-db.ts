@@ -2,7 +2,11 @@
 /**
  * Drop all tables + enums, recreate from schema, seed test users.
  *
- * Usage: bun scripts/recreate-db.ts
+ * DESTRUCTIVE: drops every table in the `public` schema, which is shared by all 4 services.
+ * Refuses to run when NODE_ENV=production, and requires the exact database name as a
+ * confirmation flag so a run against the wrong DB cannot happen by accident.
+ *
+ * Usage: bun scripts/recreate-db.ts --confirm=<database name>
  */
 import 'dotenv/config';
 import postgres from 'postgres';
@@ -24,8 +28,29 @@ function resolveDatabaseUrl(): string {
   return url.toString();
 }
 
+/** Database name from the URL (never the URL itself: it carries the password). */
+function databaseName(url: string): string {
+  return new URL(url).pathname.replace(/^\//, '');
+}
+
+function assertSafeToRecreate(url: string): void {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('recreate-db refuses to run when NODE_ENV=production');
+  }
+  const dbName = databaseName(url);
+  const confirmArg = process.argv.find((arg) => arg.startsWith('--confirm='));
+  const confirmed = confirmArg?.slice('--confirm='.length);
+  if (!dbName || confirmed !== dbName) {
+    throw new Error(
+      `recreate-db drops all tables. Re-run with --confirm=${dbName || '<database name>'} to proceed`,
+    );
+  }
+}
+
 async function main(): Promise<void> {
   const url = resolveDatabaseUrl();
+  assertSafeToRecreate(url);
+  console.log(`Recreating database "${databaseName(url)}"…`);
   const sql = postgres(url);
 
   console.log('Dropping all tables…');

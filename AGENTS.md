@@ -12,7 +12,7 @@ bun run start:dev       # Dev server on :8888 with --watch
 **First-time setup** (or after dropping DB):
 
 ```bash
-bun scripts/recreate-db.ts   # Drop → push schema → seed 3 accounts
+bun scripts/recreate-db.ts --confirm=<db name>   # Drop → push schema → seed 3 accounts (refuses NODE_ENV=production)
 ```
 
 - **Runtime**: Bun (`bun run <script>`). Install deps with `npm install` (lockfile is npm's).

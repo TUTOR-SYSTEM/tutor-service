@@ -2,8 +2,12 @@ import { Inject, Injectable } from '@nestjs/common';
 import { and, count, desc, eq, inArray, or, type SQL, sum } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { DRIZZLE } from '../../database/database.module';
-import { classes, tuitions, users } from 'src/database/schema';
-import type { CreateTuitionDto, GetTuitionsQueryDto } from '@packages/entities/tuition';
+import { classes, classStudents, tuitions, users } from 'src/database/schema';
+import type {
+  CreateTuitionDto,
+  GetTuitionsQueryDto,
+  UpdateTuitionDto,
+} from '@packages/entities/tuition';
 import { toDate } from '@packages/helpers/date.helper';
 
 @Injectable()
@@ -120,20 +124,32 @@ export class TuitionRepository {
     return row ? this.serialize(row) : null;
   }
 
-  async update(id: string, data: Record<string, unknown>) {
-    const { dueDate, paidDate, ...rest } = data;
+  /** Only the editable fields are written: classId/studentId can never move a tuition. */
+  async update(id: string, data: UpdateTuitionDto) {
+    const { amount, dueDate, paidDate, status, note } = data;
     const [tuition] = await this.db
       .update(tuitions)
       .set({
-        ...rest,
-        ...(dueDate !== undefined && { dueDate: toDate(dueDate as Date | string | null) }),
-        ...(paidDate !== undefined && { paidDate: toDate(paidDate as Date | string | null) }),
+        ...(amount !== undefined && { amount: String(amount) }),
+        ...(status !== undefined && { status }),
+        ...(note !== undefined && { note }),
+        ...(dueDate !== undefined && { dueDate: toDate(dueDate) }),
+        ...(paidDate !== undefined && { paidDate: toDate(paidDate) }),
         updatedAt: new Date(),
       })
       .where(eq(tuitions.id, id))
       .returning();
     if (!tuition) return null;
     return this.findById(id);
+  }
+
+  async isStudentEnrolled({ classId, studentId }: { classId: string; studentId: string }) {
+    const [row] = await this.db
+      .select({ id: classStudents.id })
+      .from(classStudents)
+      .where(and(eq(classStudents.classId, classId), eq(classStudents.studentId, studentId)))
+      .limit(1);
+    return !!row;
   }
 
   async delete(id: string) {
@@ -152,9 +168,11 @@ export class TuitionRepository {
   }
 
   /** Tuition + its class's tutor in one query, for update/delete ownership checks. */
-  async findOwnerById(id: string): Promise<{ id: string; tutorId: string } | null> {
+  async findOwnerById(
+    id: string,
+  ): Promise<{ id: string; tutorId: string; status: string | null } | null> {
     const [row] = await this.db
-      .select({ id: tuitions.id, tutorId: classes.tutorId })
+      .select({ id: tuitions.id, tutorId: classes.tutorId, status: tuitions.status })
       .from(tuitions)
       .innerJoin(classes, eq(tuitions.classId, classes.id))
       .where(eq(tuitions.id, id))

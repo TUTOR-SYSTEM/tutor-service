@@ -1,4 +1,9 @@
-import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ERROR_MESSAGES } from 'src/data/constants';
 import { CurriculumService } from 'src/features/curriculum/curriculum.service';
@@ -17,7 +22,7 @@ const CURRICULUM_ID = '22222222-2222-4222-8222-222222222222';
 describe('CurriculumService', () => {
   let service: CurriculumService;
   let repo: Record<string, jest.Mock>;
-  let userService: { userExists: jest.Mock };
+  let userService: { userExists: jest.Mock; getUserRoleById: jest.Mock };
 
   beforeEach(async () => {
     repo = {
@@ -29,7 +34,10 @@ describe('CurriculumService', () => {
       update: jest.fn(),
       delete: jest.fn(),
     };
-    userService = { userExists: jest.fn().mockResolvedValue(true) };
+    userService = {
+      userExists: jest.fn().mockResolvedValue(true),
+      getUserRoleById: jest.fn().mockResolvedValue({ id: USER_ID, role: 'TUTOR' }),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -76,11 +84,21 @@ describe('CurriculumService', () => {
     });
 
     it('rejects a user id that does not exist', async () => {
-      userService.userExists.mockResolvedValue(false);
+      userService.getUserRoleById.mockResolvedValue(null);
 
       await expect(
         service.createCurriculumService({ userId: USER_ID, createCurriculum: {} as never }),
       ).rejects.toThrow(new BadRequestException(ERROR_MESSAGES.USER_NOT_FOUND));
+      expect(repo.create).not.toHaveBeenCalled();
+    });
+
+    // regression (TUT3-21): students and parents cannot author curricula
+    it('rejects a STUDENT or PARENT actor and inserts nothing', async () => {
+      userService.getUserRoleById.mockResolvedValue({ id: USER_ID, role: 'STUDENT' });
+
+      await expect(
+        service.createCurriculumService({ userId: USER_ID, createCurriculum: {} as never }),
+      ).rejects.toThrow(new ForbiddenException(ERROR_MESSAGES.PERMISSION_DENIED));
       expect(repo.create).not.toHaveBeenCalled();
     });
 

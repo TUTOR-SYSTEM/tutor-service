@@ -1,7 +1,35 @@
-import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus } from '@nestjs/common';
+import {
+  ArgumentsHost,
+  Catch,
+  ExceptionFilter,
+  HttpException,
+  HttpStatus,
+  Logger,
+} from '@nestjs/common';
 import { throwError } from 'rxjs';
 
 const SERVICE_NAME = 'tutor-service';
+
+/**
+ * Postgres SQLSTATE codes that mean the caller sent bad data (not a server fault). Mapped to a
+ * 4xx with a fixed message so the raw SQL/driver text never reaches the client.
+ */
+const PG_CLIENT_ERRORS: Record<string, { status: number; message: string }> = {
+  '22P02': { status: HttpStatus.BAD_REQUEST, message: 'Invalid input format' },
+  '23503': { status: HttpStatus.BAD_REQUEST, message: 'Referenced record does not exist' },
+  '23505': { status: HttpStatus.CONFLICT, message: 'Record already exists' },
+};
+
+const logger = new Logger('RpcExceptionFilter');
+
+/** drizzle wraps the driver error in `cause`; check both levels for a 5-char SQLSTATE. */
+function pgErrorCode(exception: unknown): string | undefined {
+  for (const candidate of [exception, (exception as { cause?: unknown })?.cause]) {
+    const code = (candidate as { code?: unknown } | undefined)?.code;
+    if (typeof code === 'string' && /^[0-9A-Z]{5}$/.test(code)) return code;
+  }
+  return undefined;
+}
 
 export interface RpcErrorPayload {
   statusCode: number;
@@ -46,12 +74,29 @@ export class RpcExceptionFilter implements ExceptionFilter {
       );
     }
 
-    const message = exception instanceof Error ? exception.message : 'Internal server error';
+    const pgCode = pgErrorCode(exception);
+    const mapped = pgCode ? PG_CLIENT_ERRORS[pgCode] : undefined;
+    if (mapped) {
+      return throwError(
+        () =>
+          ({
+            statusCode: mapped.status,
+            message: mapped.message,
+            serviceName: SERVICE_NAME,
+          }) satisfies RpcErrorPayload,
+      );
+    }
+
+    // unexpected failure: keep the detail (SQL, parameters) in the server log only
+    logger.error(
+      `Unhandled RPC error${pgCode ? ` (pg ${pgCode})` : ''}`,
+      exception instanceof Error ? exception.stack : undefined,
+    );
     return throwError(
       () =>
         ({
           statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
-          message,
+          message: 'Internal server error',
           serviceName: SERVICE_NAME,
         }) satisfies RpcErrorPayload,
     );
