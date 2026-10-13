@@ -28,6 +28,7 @@ describe('ChapterService', () => {
   beforeEach(async () => {
     repo = {
       create: jest.fn(),
+      curriculumExists: jest.fn().mockResolvedValue(true),
       findAll: jest.fn(),
       findById: jest.fn(),
       update: jest.fn(),
