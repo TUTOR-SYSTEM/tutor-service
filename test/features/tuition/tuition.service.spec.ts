@@ -8,6 +8,7 @@ const TUTOR_ID = '11111111-1111-4111-8111-111111111111';
 const OTHER_TUTOR_ID = '22222222-2222-4222-8222-222222222222';
 const CLASS_ID = '33333333-3333-4333-8333-333333333333';
 const TUITION_ID = '44444444-4444-4444-8444-444444444444';
+const STUDENT_ID = '66666666-6666-4666-8666-666666666666';
 
 describe('TuitionService', () => {
   let service: TuitionService;
@@ -21,6 +22,7 @@ describe('TuitionService', () => {
       update: jest.fn(),
       delete: jest.fn(),
       getClassTutorId: jest.fn().mockResolvedValue(TUTOR_ID),
+      isStudentEnrolled: jest.fn().mockResolvedValue(true),
       findOwnerById: jest.fn().mockResolvedValue({ id: TUITION_ID, tutorId: TUTOR_ID }),
       getSummary: jest.fn(),
     };
@@ -36,11 +38,28 @@ describe('TuitionService', () => {
     it('creates the tuition when the tutor owns the class', async () => {
       repo.create.mockResolvedValue({ id: TUITION_ID });
 
-      const result = await service.create({ classId: CLASS_ID } as never, TUTOR_ID);
+      const result = await service.create(
+        { classId: CLASS_ID, studentId: STUDENT_ID } as never,
+        TUTOR_ID,
+      );
 
       expect(repo.getClassTutorId).toHaveBeenCalledWith(CLASS_ID);
-      expect(repo.create).toHaveBeenCalledWith({ classId: CLASS_ID });
+      expect(repo.create).toHaveBeenCalledWith({ classId: CLASS_ID, studentId: STUDENT_ID });
       expect(result).toEqual({ id: TUITION_ID });
+    });
+
+    // regression (TUT3-05): a studentId outside the class must not get a tuition (and its profile)
+    it('returns BadRequest and inserts nothing when the student is not enrolled in the class', async () => {
+      repo.isStudentEnrolled.mockResolvedValue(false);
+
+      await expect(
+        service.create({ classId: CLASS_ID, studentId: STUDENT_ID } as never, TUTOR_ID),
+      ).rejects.toThrow(new BadRequestException(ERROR_MESSAGES.STUDENT_NOT_IN_CLASS));
+      expect(repo.isStudentEnrolled).toHaveBeenCalledWith({
+        classId: CLASS_ID,
+        studentId: STUDENT_ID,
+      });
+      expect(repo.create).not.toHaveBeenCalled();
     });
 
     it('returns NotFound and inserts nothing when another tutor owns the class', async () => {
@@ -109,6 +128,28 @@ describe('TuitionService', () => {
         { id: TUITION_ID, amount: 100 },
       );
       expect(repo.update).toHaveBeenCalledWith(TUITION_ID, { amount: 100 });
+    });
+
+    // regression (TUT3-42): re-saving an already-PAID tuition must not overwrite the payment date
+    it('keeps the original paidDate when the tuition is already PAID', async () => {
+      repo.findOwnerById.mockResolvedValue({ id: TUITION_ID, tutorId: TUTOR_ID, status: 'PAID' });
+      repo.update.mockResolvedValue({ id: TUITION_ID });
+
+      await service.update(TUITION_ID, { status: 'PAID' } as never, TUTOR_ID);
+
+      expect(repo.update).toHaveBeenCalledWith(TUITION_ID, { status: 'PAID' });
+    });
+
+    it('stamps paidDate when a tuition transitions into PAID', async () => {
+      repo.findOwnerById.mockResolvedValue({ id: TUITION_ID, tutorId: TUTOR_ID, status: 'UNPAID' });
+      repo.update.mockResolvedValue({ id: TUITION_ID });
+
+      await service.update(TUITION_ID, { status: 'PAID' } as never, TUTOR_ID);
+
+      expect(repo.update).toHaveBeenCalledWith(TUITION_ID, {
+        status: 'PAID',
+        paidDate: expect.any(Date),
+      });
     });
 
     it('hides records owned by another tutor as NotFound and does not update', async () => {

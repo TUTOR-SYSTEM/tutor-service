@@ -7,6 +7,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ClassRepository } from './class.repository';
+
+type ClassDetail = NonNullable<Awaited<ReturnType<ClassRepository['getClass']>>>;
+type RosterRow = Awaited<ReturnType<ClassRepository['getAllStudent']>>[number];
 import {
   AddStudentsDto,
   CreateClassDto,
@@ -192,6 +195,29 @@ export class ClassService {
     return { classData, isOwner };
   }
 
+  // Contact data (email/phone, parent relationship) is for the owning tutor only. Enrolled
+  // students and parents of enrolled students see names and avatars of their classmates.
+  private toPublicRoster(rows: RosterRow[]) {
+    return rows.map(({ email: _email, phone: _phone, parent, ...student }) => ({
+      ...student,
+      parent: parent?.id
+        ? {
+            id: parent.id,
+            firstName: parent.firstName,
+            lastName: parent.lastName,
+            avatar: parent.avatar,
+          }
+        : null,
+    }));
+  }
+
+  private toPublicClass(classData: ClassDetail) {
+    return {
+      ...classData,
+      students: classData.students.map(({ email: _email, phone: _phone, ...student }) => student),
+    };
+  }
+
   // detail read: class owner (tutor), an enrolled student, or a parent of an enrolled student —
   // same access rule as getClassWatchService. Anyone else gets NotFound (not Forbidden).
   async getClassService({ userId, id }: { userId: string; id: string }) {
@@ -203,13 +229,14 @@ export class ClassService {
     const classData = await this.repo.getClass({ id });
     if (!classData) throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
 
+    const isOwner = classData.tutorId === userId;
     const canAccess =
-      classData.tutorId === userId ||
+      isOwner ||
       (await this.repo.isEnrolled({ userId, classId: id })) ||
       (await this.repo.isParentOfEnrolled({ userId, classId: id }));
     if (!canAccess) throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
 
-    return classData;
+    return isOwner ? classData : this.toPublicClass(classData);
   }
 
   // add one student (studentIds of length 1) or bulk students into a single class
@@ -259,6 +286,10 @@ export class ClassService {
     if (!classData) throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
     if (classData.tutorId !== userId) throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
 
+    // deleting cascades to tuitions, attendances, sessions and schedules: keep financial history
+    if (await this.repo.hasTuitionHistory({ classId: id }))
+      throw new ConflictException(ERROR_MESSAGES.CLASS_HAS_TUITION_HISTORY);
+
     const deleted = await this.repo.delClass({ id });
     if (!deleted) throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
 
@@ -295,7 +326,7 @@ export class ClassService {
     const { classData, isOwner } = await this.loadAccessibleClass({ userId, id });
 
     const [students, schedules, recentSessionRow] = await Promise.all([
-      this.repo.getAllStudent({ id }),
+      this.repo.getAllStudent({ id }).then((rows) => (isOwner ? rows : this.toPublicRoster(rows))),
       this.repo.getSchedulesByClass({ classId: id }),
       this.repo.getRecentSessionByClass({ classId: id }),
     ]);
@@ -311,7 +342,8 @@ export class ClassService {
   }
 
   async getAllStudentsService({ userId, id }: { userId: string; id: string }) {
-    await this.loadAccessibleClass({ userId, id });
-    return this.repo.getAllStudent({ id });
+    const { isOwner } = await this.loadAccessibleClass({ userId, id });
+    const roster = await this.repo.getAllStudent({ id });
+    return isOwner ? roster : this.toPublicRoster(roster);
   }
 }

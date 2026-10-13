@@ -27,6 +27,9 @@ const SENSITIVE_KEYS = [
   'token',
   'accessToken',
   'refreshToken',
+  // contact PII: roster/tuition responses carry these for students and parents
+  'email',
+  'phone',
 ];
 
 function readHeader(headers: Record<string, unknown> | undefined, key: string): string | undefined {

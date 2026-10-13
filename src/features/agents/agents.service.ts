@@ -1,9 +1,27 @@
+import { mkdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Injectable } from '@nestjs/common';
 import { query, type Options, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { ChatDto, GetHistoryQueryDto } from '@packages/entities/ai-chat';
 import { CLAUDE_MODELS } from './agents.config';
 
 const MAX_HISTORY_PER_USER = 100; // bound memory: this map lives for the process lifetime
+
+// The prompt is end-user text, so the agent must not be able to act on the host: no built-in
+// tools (no Read/Bash/Edit), no permission bypass, no project/user settings or hooks loaded from
+// the working directory, an empty throwaway cwd, and a turn cap. Applied after any caller
+// options so they cannot re-enable tools.
+const SANDBOX_CWD = join(tmpdir(), 'tutor-agent-sandbox');
+mkdirSync(SANDBOX_CWD, { recursive: true });
+const AGENT_SANDBOX_OPTIONS: Options = {
+  tools: [],
+  allowedTools: [],
+  permissionMode: 'default',
+  settingSources: [],
+  cwd: SANDBOX_CWD,
+  maxTurns: 3,
+};
 
 export interface AiChatMessage {
   role: 'user' | 'assistant';
@@ -26,6 +44,7 @@ export class AgentsService {
       options: {
         model: CLAUDE_MODELS.sonnet,
         ...options,
+        ...AGENT_SANDBOX_OPTIONS,
       },
     });
 
@@ -38,13 +57,7 @@ export class AgentsService {
 
   async chat({ userId, data }: { userId: string; data: ChatDto }) {
     const answer = await this.run(data.message);
-    const replyText =
-      answer
-        .map((message) =>
-          'text' in message && typeof message.text === 'string' ? message.text : '',
-        )
-        .filter(Boolean)
-        .join('\n') || 'Không có phản hồi từ trợ lý.';
+    const replyText = this.extractReply(answer) || 'Không có phản hồi từ trợ lý.';
 
     const reply: AiChatMessage = {
       role: 'assistant',
@@ -55,6 +68,18 @@ export class AgentsService {
     this.appendHistory(userId, reply.content, 'assistant');
 
     return { reply, history: this.historyFor(userId) };
+  }
+
+  /** Final answer of a success result; falls back to the assistant text blocks. */
+  private extractReply(messages: SDKMessage[]): string {
+    const result = messages.findLast((m) => m.type === 'result');
+    if (result?.type === 'result' && result.subtype === 'success' && result.result.trim())
+      return result.result.trim();
+    return messages
+      .flatMap((m) => (m.type === 'assistant' ? m.message.content : []))
+      .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+      .join('\n')
+      .trim();
   }
 
   getHistory({ userId, query }: { userId: string; query: GetHistoryQueryDto }) {

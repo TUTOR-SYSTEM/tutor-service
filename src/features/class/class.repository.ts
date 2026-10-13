@@ -11,6 +11,7 @@ import {
   lessons,
   schedules,
   sessions,
+  tuitions,
   users,
 } from 'src/database/schema';
 import { buildListWhereClause } from '@packages/helpers';
@@ -260,6 +261,16 @@ export class ClassRepository {
       .orderBy(classStudents.createdAt);
 
     return { ...classData, students };
+  }
+
+  /** True when any tuition record (any status) still references the class. */
+  async hasTuitionHistory({ classId }: { classId: string }) {
+    const [row] = await this.db
+      .select({ id: tuitions.id })
+      .from(tuitions)
+      .where(eq(tuitions.classId, classId))
+      .limit(1);
+    return !!row;
   }
 
   async delClass({ id }: { id: string }) {

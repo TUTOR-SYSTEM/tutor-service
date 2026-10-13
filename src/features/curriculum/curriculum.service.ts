@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -46,8 +47,11 @@ export class CurriculumService {
       throw new BadRequestException(ERROR_MESSAGES.USER_ID_MUST_BE_UUID);
     }
 
-    if (!(await this.userService.userExists(userId)))
-      throw new BadRequestException(ERROR_MESSAGES.USER_NOT_FOUND);
+    // only tutors/admins author curricula (every chapter/lesson write is checked against owner)
+    const acting = await this.userService.getUserRoleById(userId);
+    if (!acting) throw new BadRequestException(ERROR_MESSAGES.USER_NOT_FOUND);
+    if (acting.role !== 'TUTOR' && acting.role !== 'ADMIN')
+      throw new ForbiddenException(ERROR_MESSAGES.PERMISSION_DENIED);
     return await this.curriculumRepository.create({ userId, data: createCurriculum });
   }
 

@@ -42,13 +42,7 @@ export class ChapterService {
     if (!curriculumId || !checkUuidValid({ data: curriculumId })) {
       throw new BadRequestException(ERROR_MESSAGES.CURRICULUM_ID_MUST_BE_UUID);
     }
-<<<<<<< Updated upstream
     await this.assertCurriculumOwner(curriculumId, userId);
-=======
-    // check the parent exists first: a missing curriculum would otherwise fail on the FK (500)
-    const exists = await this.chapterRepository.curriculumExists(curriculumId);
-    if (!exists) throw new NotFoundException(ERROR_MESSAGES.CURRICULUM_NOT_FOUND);
->>>>>>> Stashed changes
     return await this.chapterRepository.create({ curriculumId, data });
   }
 

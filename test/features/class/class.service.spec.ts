@@ -39,6 +39,7 @@ describe('ClassService', () => {
       getClass: jest.fn(),
       getAllStudent: jest.fn(),
       delClass: jest.fn(),
+      hasTuitionHistory: jest.fn().mockResolvedValue(false),
       isEnrolled: jest.fn().mockResolvedValue(false),
       isParentOfEnrolled: jest.fn().mockResolvedValue(false),
       addStudents: jest.fn(),
@@ -407,21 +408,44 @@ describe('ClassService', () => {
       ).resolves.toMatchObject({ tutorId: TUTOR_ID });
     });
 
-    it('allows an enrolled student', async () => {
-      repo.getClass.mockResolvedValue(cls);
+    it('allows an enrolled student and strips classmates contact details', async () => {
+      const withRoster = {
+        ...cls,
+        students: [{ id: STUDENT_B, firstName: 'B', email: 'b@x.io', phone: '0900' }],
+      };
+      repo.getClass.mockResolvedValue(withRoster);
       repo.isEnrolled.mockResolvedValue(true);
 
-      await expect(service.getClassService({ userId: STUDENT_A, id: CLASS_ID })).resolves.toEqual(
-        cls,
-      );
+      await expect(service.getClassService({ userId: STUDENT_A, id: CLASS_ID })).resolves.toEqual({
+        ...cls,
+        students: [{ id: STUDENT_B, firstName: 'B' }],
+      });
     });
 
-    it('allows a parent of an enrolled student', async () => {
-      repo.getClass.mockResolvedValue(cls);
+    it('allows a parent of an enrolled student and strips classmates contact details', async () => {
+      const withRoster = {
+        ...cls,
+        students: [{ id: STUDENT_B, firstName: 'B', email: 'b@x.io', phone: '0900' }],
+      };
+      repo.getClass.mockResolvedValue(withRoster);
       repo.isParentOfEnrolled.mockResolvedValue(true);
 
-      await expect(service.getClassService({ userId: STUDENT_A, id: CLASS_ID })).resolves.toEqual(
-        cls,
+      await expect(service.getClassService({ userId: STUDENT_A, id: CLASS_ID })).resolves.toEqual({
+        ...cls,
+        students: [{ id: STUDENT_B, firstName: 'B' }],
+      });
+    });
+
+    it('returns contact details to the class tutor', async () => {
+      const withRoster = {
+        ...cls,
+        tutorId: TUTOR_ID,
+        students: [{ id: STUDENT_B, firstName: 'B', email: 'b@x.io', phone: '0900' }],
+      };
+      repo.getClass.mockResolvedValue(withRoster);
+
+      await expect(service.getClassService({ userId: TUTOR_ID, id: CLASS_ID })).resolves.toEqual(
+        withRoster,
       );
     });
 
@@ -449,6 +473,16 @@ describe('ClassService', () => {
 
       await expect(service.delClassService({ userId: TUTOR_ID, id: CLASS_ID })).rejects.toThrow(
         NotFoundException,
+      );
+      expect(repo.delClass).not.toHaveBeenCalled();
+    });
+
+    it('refuses to delete a class that still has tuition records', async () => {
+      repo.getClassByField.mockResolvedValue({ id: CLASS_ID, tutorId: TUTOR_ID });
+      repo.hasTuitionHistory.mockResolvedValue(true);
+
+      await expect(service.delClassService({ userId: TUTOR_ID, id: CLASS_ID })).rejects.toThrow(
+        new ConflictException(ERROR_MESSAGES.CLASS_HAS_TUITION_HISTORY),
       );
       expect(repo.delClass).not.toHaveBeenCalled();
     });
@@ -640,6 +674,39 @@ describe('ClassService', () => {
       ).resolves.toEqual([]);
     });
 
+    // regression (TUT3-04): non-owners get the roster without email/phone or parent contact
+    it('hides student and parent contact details from a non-owner', async () => {
+      repo.getClassByField.mockResolvedValue(cls);
+      repo.isEnrolled.mockResolvedValue(true);
+      repo.getAllStudent.mockResolvedValue([
+        {
+          id: STUDENT_B,
+          firstName: 'B',
+          email: 'b@x.io',
+          phone: '0900',
+          parent: {
+            id: 'p1',
+            firstName: 'P',
+            lastName: 'Q',
+            email: 'p@x.io',
+            phone: '0911',
+            avatar: null,
+            relationship: 'MOTHER',
+          },
+        },
+      ]);
+
+      const roster = await service.getAllStudentsService({ userId: STUDENT_A, id: CLASS_ID });
+
+      expect(roster).toEqual([
+        {
+          id: STUDENT_B,
+          firstName: 'B',
+          parent: { id: 'p1', firstName: 'P', lastName: 'Q', avatar: null },
+        },
+      ]);
+    });
+
     it('grants a parent of an enrolled student access', async () => {
       repo.getClassByField.mockResolvedValue(cls);
       repo.isParentOfEnrolled.mockResolvedValue(true);
@@ -732,7 +799,7 @@ describe('ClassService', () => {
     beforeEach(() => {
       repo.getClassByField.mockResolvedValue(cls);
       repo.isEnrolled.mockResolvedValue(true);
-      repo.getAllStudent.mockResolvedValue([{ id: STUDENT_A }]);
+      repo.getAllStudent.mockResolvedValue([{ id: STUDENT_A, email: 'a@x.io', phone: null }]);
       repo.getSchedulesByClass.mockResolvedValue([{ id: 'sch-1' }]);
     });
 
@@ -745,7 +812,7 @@ describe('ClassService', () => {
         class: cls,
         recentSession: null,
         schedules: [{ id: 'sch-1' }],
-        students: [{ id: STUDENT_A }],
+        students: [{ id: STUDENT_A, parent: null }],
       });
     });
 

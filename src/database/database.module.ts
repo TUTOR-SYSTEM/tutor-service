@@ -57,7 +57,7 @@ export const DATABASE_ENVS = [
 
         for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
           try {
-            logger.log('this connection:', databaseUrl);
+            // never log the connection string: DATABASE_URL carries the Postgres password
             await client`SELECT 1`;
             logger.log('✅ PostgreSQL connected.');
             return drizzle(client, { schema: tables });

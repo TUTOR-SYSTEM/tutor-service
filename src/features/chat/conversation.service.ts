@@ -593,27 +593,33 @@ export class ConversationService {
 
           const studentIdList = studentIds.map((s) => s.studentId);
 
-          const parents = await this.db
-            .select({
-              id: users.id,
-              firstName: users.firstName,
-              lastName: users.lastName,
-              avatar: users.avatar,
-              role: users.role,
-            })
-            .from(users)
-            .where(sql`${users.parentId} IN ${studentIdList}`);
+          const parents =
+            studentIdList.length === 0
+              ? []
+              : await this.db
+                  .select({
+                    id: users.id,
+                    firstName: users.firstName,
+                    lastName: users.lastName,
+                    avatar: users.avatar,
+                    role: users.role,
+                  })
+                  .from(users)
+                  .where(sql`${users.parentId} IN ${studentIdList}`);
 
-          const students = await this.db
-            .select({
-              id: users.id,
-              firstName: users.firstName,
-              lastName: users.lastName,
-              avatar: users.avatar,
-              role: users.role,
-            })
-            .from(users)
-            .where(sql`${users.id} IN ${studentIdList}`);
+          const students =
+            studentIdList.length === 0
+              ? []
+              : await this.db
+                  .select({
+                    id: users.id,
+                    firstName: users.firstName,
+                    lastName: users.lastName,
+                    avatar: users.avatar,
+                    role: users.role,
+                  })
+                  .from(users)
+                  .where(sql`${users.id} IN ${studentIdList}`);
 
           const admins = await this.db
             .select({

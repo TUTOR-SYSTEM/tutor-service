@@ -191,7 +191,7 @@ describe('TraceContextInterceptor', () => {
 
       const entry = sink.mock.calls[0][0];
       expect(JSON.parse(entry.requestBody as string)).toEqual({
-        email: 'a@b.dev',
+        email: '[REDACTED]',
         password: '[REDACTED]',
         nested: { refreshToken: '[REDACTED]', list: [{ oldPassword: '[REDACTED]', ok: true }] },
       });
