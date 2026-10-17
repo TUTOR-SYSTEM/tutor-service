@@ -9,8 +9,12 @@ import {
 import { ERROR_MESSAGES } from 'src/data/constants';
 import { CurriculumRepository } from './curriculum.repository';
 import { UserService } from '../user/user.service';
-import { type GetCurriculumsQueryDto, type CreateCurriculumDto } from '@packages/entities';
-import { checkUuidValid, generateCode } from '@packages/helpers';
+import {
+  type GetCurriculumsQueryDto,
+  type CreateCurriculumDto,
+  type UpdateCurriculumDto,
+} from '@packages/entities';
+import { canActOnOwned, checkUuidValid, generateCode } from '@packages/helpers';
 
 @Injectable()
 export class CurriculumService {
@@ -41,6 +45,7 @@ export class CurriculumService {
     createCurriculum,
   }: {
     userId: string;
+    role?: string | null;
     createCurriculum: CreateCurriculumDto;
   }) {
     if (!userId || !checkUuidValid({ data: userId })) {
@@ -60,16 +65,15 @@ export class CurriculumService {
     query,
   }: {
     userId: string;
+    role?: string | null;
     query: GetCurriculumsQueryDto;
   }) {
-    this.logger.log('user id : ', userId);
     if (!userId || !checkUuidValid({ data: userId })) {
       throw new BadRequestException(ERROR_MESSAGES.USER_ID_MUST_BE_UUID);
     }
 
     if (!(await this.userService.userExists(userId)))
       throw new BadRequestException(ERROR_MESSAGES.USER_NOT_FOUND);
-    this.logger.log('query :', query);
     return await this.curriculumRepository.findAll({
       page: query.page,
       limit: query.limit,
@@ -77,7 +81,14 @@ export class CurriculumService {
     });
   }
 
-  async getCurriculumByIdService({ userId, id }: { userId: string; id: string }) {
+  async getCurriculumByIdService({
+    userId,
+    id,
+  }: {
+    userId: string;
+    role?: string | null;
+    id: string;
+  }) {
     if (!userId || !checkUuidValid({ data: userId })) {
       throw new BadRequestException(ERROR_MESSAGES.USER_ID_MUST_BE_UUID);
     }
@@ -87,17 +98,22 @@ export class CurriculumService {
 
     if (!(await this.userService.userExists(userId)))
       throw new BadRequestException(ERROR_MESSAGES.USER_NOT_FOUND);
-    return await this.curriculumRepository.findByIdWithDetails(id);
+    // catalog read (no owner check); a missing curriculum is a 404, never null + 200
+    const curriculum = await this.curriculumRepository.findByIdWithDetails(id);
+    if (!curriculum) throw new NotFoundException(ERROR_MESSAGES.CURRICULUM_NOT_FOUND);
+    return curriculum;
   }
 
   async updateCurriculumService({
     userId,
+    role,
     id,
     data,
   }: {
     userId: string;
+    role?: string | null;
     id: string;
-    data: CreateCurriculumDto;
+    data: UpdateCurriculumDto;
   }) {
     if (!userId || !checkUuidValid({ data: userId })) {
       throw new BadRequestException(ERROR_MESSAGES.USER_ID_MUST_BE_UUID);
@@ -110,14 +126,22 @@ export class CurriculumService {
       throw new BadRequestException(ERROR_MESSAGES.USER_NOT_FOUND);
     const existing = await this.curriculumRepository.findById(id);
     // 404 (not 403) for someone else's curriculum, same as class/session ownership checks.
-    if (!existing || existing.userId !== userId) {
+    if (!existing || !canActOnOwned({ userId, role }, existing.userId)) {
       throw new NotFoundException(ERROR_MESSAGES.CURRICULUM_NOT_FOUND);
     }
 
     return await this.curriculumRepository.update(id, data);
   }
 
-  async deleteCurriculumService({ userId, id }: { userId: string; id: string }) {
+  async deleteCurriculumService({
+    userId,
+    role,
+    id,
+  }: {
+    userId: string;
+    role?: string | null;
+    id: string;
+  }) {
     if (!userId || !checkUuidValid({ data: userId })) {
       throw new BadRequestException(ERROR_MESSAGES.USER_ID_MUST_BE_UUID);
     }
@@ -128,7 +152,7 @@ export class CurriculumService {
     if (!(await this.userService.userExists(userId)))
       throw new BadRequestException(ERROR_MESSAGES.USER_NOT_FOUND);
     const existing = await this.curriculumRepository.findById(id);
-    if (!existing || existing.userId !== userId) {
+    if (!existing || !canActOnOwned({ userId, role }, existing.userId)) {
       throw new NotFoundException(ERROR_MESSAGES.CURRICULUM_NOT_FOUND);
     }
 

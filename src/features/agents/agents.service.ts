@@ -67,7 +67,8 @@ export class AgentsService {
     this.appendHistory(userId, data.message);
     this.appendHistory(userId, reply.content, 'assistant');
 
-    return { reply, history: this.historyFor(userId) };
+    // `reply` is the answer text (CONTRACT C4); the full message record rides alongside it
+    return { reply: reply.content, message: reply, history: this.historyFor(userId) };
   }
 
   /** Final answer of a success result; falls back to the assistant text blocks. */

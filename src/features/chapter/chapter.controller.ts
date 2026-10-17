@@ -20,6 +20,7 @@ import {
 } from '@packages/entities';
 import { ChapterService } from './chapter.service';
 import { ZodValidationPipe } from '@packages/pipes';
+import { ParseUUIDPipe } from '@nestjs/common';
 
 @ApiTags('Chapter')
 @ApiBearerAuth('access-token')
@@ -46,11 +47,12 @@ export class ChapterController {
   @ApiResponse({ statusCode: StatusCodes.CREATED, message: 'Create chapter successfully' })
   async createChapterController(
     @CurrentUser() user: Record<string, string>,
-    @Param('curriculumId') curriculumId: string,
+    @Param('curriculumId', ParseUUIDPipe) curriculumId: string,
     @Body(new ZodValidationPipe<CreateChapterDto>(createChapterSchema)) data: CreateChapterDto,
   ) {
     return await this.chapterService.createChapterService({
       userId: user.id,
+      role: user.role,
       curriculumId,
       data,
     });
@@ -77,7 +79,7 @@ export class ChapterController {
   @ApiParam({ name: 'id', description: 'Chapter ID', type: 'string' })
   @SwaggerResponse({ status: StatusCodes.OK, description: 'Get chapter by id' })
   @ApiResponse({ statusCode: StatusCodes.OK, message: 'Get chapter successfully' })
-  async getChapterByIdController(@Param('id') id: string) {
+  async getChapterByIdController(@Param('id', ParseUUIDPipe) id: string) {
     return await this.chapterService.getChapterByIdService({ id });
   }
 
@@ -99,10 +101,15 @@ export class ChapterController {
   @ApiResponse({ statusCode: StatusCodes.OK, message: 'Update chapter successfully' })
   async updateChapterController(
     @CurrentUser() user: Record<string, string>,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body(new ZodValidationPipe<UpdateChapterDto>(updateChapterSchema)) data: UpdateChapterDto,
   ) {
-    return await this.chapterService.updateChapterService({ userId: user.id, id, data });
+    return await this.chapterService.updateChapterService({
+      userId: user.id,
+      role: user.role,
+      id,
+      data,
+    });
   }
 
   @Delete(':id')
@@ -113,8 +120,8 @@ export class ChapterController {
   @ApiResponse({ statusCode: StatusCodes.OK, message: 'Delete chapter successfully' })
   async deleteChapterController(
     @CurrentUser() user: Record<string, string>,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return await this.chapterService.deleteChapterService({ userId: user.id, id });
+    return await this.chapterService.deleteChapterService({ userId: user.id, role: user.role, id });
   }
 }

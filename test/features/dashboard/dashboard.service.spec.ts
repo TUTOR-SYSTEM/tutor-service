@@ -4,6 +4,7 @@ import { ERROR_MESSAGES } from 'src/data/constants';
 import { DashboardService } from 'src/features/dashboard/dashboard.service';
 import { DashboardRepository } from 'src/features/dashboard/dashboard.repository';
 import { UserService } from 'src/features/user/user.service';
+import { RmqProducer } from 'src/features/rabbitmq/rmq.producer';
 
 // dashboard.repository pulls drizzle + an ESM-only transitive dep (uuid) that jest cannot
 // parse; the service only needs the repository token, so swap the module for a bare class
@@ -19,6 +20,7 @@ describe('DashboardService', () => {
   let service: DashboardService;
   let repo: Record<string, jest.Mock>;
   let user: { getUserRoleById: jest.Mock };
+  let rmq: { send: jest.Mock };
 
   beforeEach(async () => {
     repo = {
@@ -50,12 +52,14 @@ describe('DashboardService', () => {
       }),
     };
     user = { getUserRoleById: jest.fn().mockResolvedValue({ id: USER_ID, role: 'TUTOR' }) };
+    rmq = { send: jest.fn().mockResolvedValue({ data: [{ id: 'n1' }], pagination: {} }) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         DashboardService,
         { provide: DashboardRepository, useValue: repo },
         { provide: UserService, useValue: user },
+        { provide: RmqProducer, useValue: rmq },
       ],
     }).compile();
 
@@ -110,6 +114,27 @@ describe('DashboardService', () => {
       expect(result.todaySchedule).toEqual([{ id: 'today' }]);
       expect(result.upcomingSchedule).toEqual([{ id: 'next' }]);
       expect(repo.getUpcomingSchedule).toHaveBeenCalledWith('TUTOR_SCOPE', expect.any(Date), 5);
+    });
+
+    it('attaches recent notifications from third-service (best-effort, no retries)', async () => {
+      const result = await service.getOverview(USER_ID);
+
+      expect(rmq.send).toHaveBeenCalledWith(
+        'notification.getAll',
+        { userId: USER_ID, query: { page: 1, limit: 5 } },
+        5000,
+        0,
+      );
+      expect(result.recentNotifications).toEqual([{ id: 'n1' }]);
+    });
+
+    it('returns an empty notification list instead of failing when third-service is down', async () => {
+      rmq.send.mockRejectedValueOnce(new Error('broker unavailable'));
+
+      const result = await service.getOverview(USER_ID);
+
+      expect(result.recentNotifications).toEqual([]);
+      expect(result.todaySchedule).toEqual([{ id: 'today' }]);
     });
   });
 

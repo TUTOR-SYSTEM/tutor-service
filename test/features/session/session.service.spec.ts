@@ -22,7 +22,7 @@ describe('SessionService', () => {
   let repo: Record<string, jest.Mock>;
   let classService: { getOwnedClassService: jest.Mock };
   let lessonService: { getLessonByIdService: jest.Mock };
-  let userService: { userExists: jest.Mock };
+  let userService: { getUserRoleById: jest.Mock };
 
   beforeEach(async () => {
     repo = {
@@ -37,9 +37,14 @@ describe('SessionService', () => {
       update: jest.fn(),
       del: jest.fn(),
     };
-    classService = { getOwnedClassService: jest.fn().mockResolvedValue({ id: CLASS_ID }) };
+    // the class row carries its tutor: that is the default session tutor
+    classService = {
+      getOwnedClassService: jest.fn().mockResolvedValue({ id: CLASS_ID, tutorId: USER_ID }),
+    };
     lessonService = { getLessonByIdService: jest.fn().mockResolvedValue({ id: LESSON_ID }) };
-    userService = { userExists: jest.fn().mockResolvedValue(true) };
+    userService = {
+      getUserRoleById: jest.fn().mockResolvedValue({ id: OTHER_USER_ID, role: 'TUTOR' }),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -66,7 +71,7 @@ describe('SessionService', () => {
       expect(repo.create).toHaveBeenCalledWith({
         data: { classId: CLASS_ID, lessonId: LESSON_ID, tutorId: USER_ID },
       });
-      expect(userService.userExists).not.toHaveBeenCalled();
+      expect(userService.getUserRoleById).not.toHaveBeenCalled();
     });
 
     it('validates an explicit tutorId that differs from the acting user', async () => {
@@ -77,14 +82,26 @@ describe('SessionService', () => {
         data: { classId: CLASS_ID, tutorId: OTHER_USER_ID } as never,
       });
 
-      expect(userService.userExists).toHaveBeenCalledWith(OTHER_USER_ID);
+      expect(userService.getUserRoleById).toHaveBeenCalledWith(OTHER_USER_ID);
       expect(repo.create).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ tutorId: OTHER_USER_ID }) }),
       );
     });
 
+    it('rejects an explicit tutorId that is a STUDENT (not a teacher) and does not insert', async () => {
+      userService.getUserRoleById.mockResolvedValue({ id: OTHER_USER_ID, role: 'STUDENT' });
+
+      await expect(
+        service.createSessionService({
+          userId: USER_ID,
+          data: { classId: CLASS_ID, tutorId: OTHER_USER_ID } as never,
+        }),
+      ).rejects.toThrow(new NotFoundException(ERROR_MESSAGES.TUTOR_NOT_FOUND));
+      expect(repo.create).not.toHaveBeenCalled();
+    });
+
     it('rejects an explicit tutorId that does not exist', async () => {
-      userService.userExists.mockResolvedValue(false);
+      userService.getUserRoleById.mockResolvedValue(null);
 
       await expect(
         service.createSessionService({

@@ -17,7 +17,15 @@ export class ChapterRpcController {
   constructor(private readonly chapterService: ChapterService) {}
 
   @MessagePattern('chapter.create')
-  create(@Payload() payload: { userId: string; curriculumId: string; data: CreateChapterDto }) {
+  create(
+    @Payload()
+    payload: {
+      userId: string;
+      role?: string;
+      curriculumId: string;
+      data: CreateChapterDto;
+    },
+  ) {
     return this.chapterService.createChapterService(payload);
   }
 
@@ -32,12 +40,14 @@ export class ChapterRpcController {
   }
 
   @MessagePattern('chapter.update')
-  update(@Payload() payload: { userId: string; id: string; data: UpdateChapterDto }) {
+  update(
+    @Payload() payload: { userId: string; role?: string; id: string; data: UpdateChapterDto },
+  ) {
     return this.chapterService.updateChapterService(payload);
   }
 
   @MessagePattern('chapter.delete')
-  del(@Payload() payload: { userId: string; id: string }) {
+  del(@Payload() payload: { userId: string; role?: string; id: string }) {
     return this.chapterService.deleteChapterService(payload);
   }
 }

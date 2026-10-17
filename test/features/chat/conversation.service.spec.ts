@@ -11,6 +11,7 @@ import {
   users,
 } from 'src/database/schema';
 import { ConversationService } from 'src/features/chat/conversation.service';
+import { ERROR_MESSAGES } from 'src/data/constants';
 
 const CURRENT = 'user-current';
 const TARGET = 'user-target';
@@ -553,6 +554,7 @@ describe('ConversationService', () => {
 
   describe('createGroupConversation', () => {
     it('inserts the creator once even when they are also listed as a participant', async () => {
+      queue('select', users, [user(CURRENT, 'ADMIN'), user('a', 'STUDENT'), user('b', 'STUDENT')]);
       queue('insert', conversations, [{ id: 'g1' }]);
       queue('insert', conversationParticipants, []);
       queueConversationDetail({ conv: [{ id: 'g1', type: 'GROUP' }] });
@@ -569,6 +571,7 @@ describe('ConversationService', () => {
     });
 
     it('creates the group with the creator first, followed by the other members', async () => {
+      queue('select', users, [user(CURRENT, 'ADMIN'), user('a', 'STUDENT')]);
       queue('insert', conversations, [{ id: 'g2' }]);
       queue('insert', conversationParticipants, []);
       queueConversationDetail({ conv: [{ id: 'g2' }] });
@@ -587,6 +590,24 @@ describe('ConversationService', () => {
         { conversationId: 'g2', userId: CURRENT },
         { conversationId: 'g2', userId: 'a' },
       ]);
+    });
+
+    it('rejects a member the creator is not allowed to chat with (no insert)', async () => {
+      queue('select', users, [user(CURRENT, 'PARENT'), user('a', 'STUDENT')]);
+
+      await expect(service.createGroupConversation(CURRENT, 'Study group', ['a'])).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(db.insert).not.toHaveBeenCalled();
+    });
+
+    it('rejects an unknown member id (no insert)', async () => {
+      queue('select', users, [user(CURRENT, 'ADMIN')]);
+
+      await expect(
+        service.createGroupConversation(CURRENT, 'Study group', ['ghost']),
+      ).rejects.toThrow(NotFoundException);
+      expect(db.insert).not.toHaveBeenCalled();
     });
   });
 
@@ -658,12 +679,35 @@ describe('ConversationService', () => {
 
     it('inserts the new participant when they are not yet in the conversation', async () => {
       queue('select', conversationParticipants, [{ userId: CURRENT }], []);
+      queue('select', conversations, [{ type: 'GROUP' }]);
+      queue('select', users, [user(CURRENT, 'ADMIN'), user(TARGET, 'STUDENT')]);
       queue('insert', conversationParticipants, []);
 
       await expect(service.addParticipant(CONV_ID, CURRENT, TARGET)).resolves.toEqual({
         message: 'Participant added successfully',
       });
       expect(db.insert).toHaveBeenCalledWith(conversationParticipants);
+    });
+
+    it('refuses to add members to a direct conversation', async () => {
+      queue('select', conversationParticipants, [{ userId: CURRENT }]);
+      queue('select', conversations, [{ type: 'DIRECT' }]);
+
+      await expect(service.addParticipant(CONV_ID, CURRENT, TARGET)).rejects.toThrow(
+        new ForbiddenException(ERROR_MESSAGES.CHAT_DIRECT_NO_ADD_PARTICIPANT),
+      );
+      expect(db.insert).not.toHaveBeenCalled();
+    });
+
+    it('refuses to add a user the caller may not chat with (no insert)', async () => {
+      queue('select', conversationParticipants, [{ userId: CURRENT }], []);
+      queue('select', conversations, [{ type: 'GROUP' }]);
+      queue('select', users, [user(CURRENT, 'PARENT'), user(TARGET, 'STUDENT')]);
+
+      await expect(service.addParticipant(CONV_ID, CURRENT, TARGET)).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(db.insert).not.toHaveBeenCalled();
     });
   });
 

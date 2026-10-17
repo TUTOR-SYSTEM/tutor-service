@@ -24,6 +24,7 @@ import {
 import { ClassService } from './class.service';
 import { CLASS_SWAGGER_MESSAGES } from 'src/data/swaggers/messages';
 import { CLASS_SWAGGERS_DATA } from 'src/data/swaggers/data/class.swagger';
+import { ParseUUIDPipe } from '@nestjs/common';
 
 @ApiTags('Classes')
 @ApiBearerAuth('access-token')
@@ -45,7 +46,7 @@ export class ClassController {
     dto: CreateClassDto,
     @CurrentUser() user: Record<string, string>,
   ) {
-    return this.classService.createClassService({ data: dto, userId: user.id });
+    return this.classService.createClassService({ data: dto, userId: user.id, role: user.role });
   }
 
   // todo : update class controller ...
@@ -60,10 +61,15 @@ export class ClassController {
   update(
     @Body(new ZodValidationPipe<UpdateClassDto>(updateClassSchema))
     dto: UpdateClassDto,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: Record<string, string>,
   ) {
-    return this.classService.updateClassService({ userId: user.id, id, data: dto });
+    return this.classService.updateClassService({
+      userId: user.id,
+      role: user.role,
+      id,
+      data: dto,
+    });
   }
 
   // todo : generate a unique class code ...
@@ -98,7 +104,7 @@ export class ClassController {
     query: GetClassesQueryDto,
     @CurrentUser() user: Record<string, string>,
   ) {
-    return this.classService.getClassesService({ userId: user?.id, query });
+    return this.classService.getClassesService({ userId: user?.id, role: user?.role, query });
   }
 
   // todo : get detail class controller ...
@@ -113,8 +119,11 @@ export class ClassController {
     description: CLASS_SWAGGER_MESSAGES.GET_CLASS_SUCCESSFULLY,
   })
   @Get('/:id')
-  getDetailClassController(@CurrentUser() user: Record<string, string>, @Param('id') id: string) {
-    return this.classService.getClassService({ userId: user?.id, id });
+  getDetailClassController(
+    @CurrentUser() user: Record<string, string>,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.classService.getClassService({ userId: user?.id, role: user?.role, id });
   }
 
   // todo : add one student or bulk students to a class ...
@@ -132,11 +141,16 @@ export class ClassController {
   })
   addStudents(
     @CurrentUser() user: Record<string, string>,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body(new ZodValidationPipe<AddStudentsDto>(addStudentsSchema))
     dto: AddStudentsDto,
   ) {
-    return this.classService.addStudentsService({ userId: user?.id, classId: id, data: dto });
+    return this.classService.addStudentsService({
+      userId: user?.id,
+      role: user?.role,
+      classId: id,
+      data: dto,
+    });
   }
 
   // todo : get list student in class ...
@@ -153,9 +167,13 @@ export class ClassController {
   })
   async getAllStudentController(
     @CurrentUser() user: Record<string, string>,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return await this.classService.getAllStudentsService({ userId: user?.id, id });
+    return await this.classService.getAllStudentsService({
+      userId: user?.id,
+      role: user?.role,
+      id,
+    });
   }
 
   // todo : get class materials (theory + exercise files) ...
@@ -169,9 +187,9 @@ export class ClassController {
   @SwaggerResponse({ status: StatusCodes.OK, description: 'Class materials retrieved' })
   async getClassMaterialsController(
     @CurrentUser() user: Record<string, string>,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.classService.getClassMaterialsService({ userId: user?.id, id });
+    return this.classService.getClassMaterialsService({ userId: user?.id, role: user?.role, id });
   }
 
   // todo : get class "watch" overview (class + recent session + schedules + students) for
@@ -185,8 +203,11 @@ export class ClassController {
   })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
   @SwaggerResponse({ status: StatusCodes.OK, description: 'Class watch overview retrieved' })
-  getClassWatchController(@CurrentUser() user: Record<string, string>, @Param('id') id: string) {
-    return this.classService.getClassWatchService({ userId: user?.id, id });
+  getClassWatchController(
+    @CurrentUser() user: Record<string, string>,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.classService.getClassWatchService({ userId: user?.id, role: user?.role, id });
   }
 
   // todo : delete class ...
@@ -201,7 +222,10 @@ export class ClassController {
     status: StatusCodes.OK,
     description: CLASS_SWAGGER_MESSAGES.DEL_CLASS_SUCCESSFULLY,
   })
-  async delClassController(@CurrentUser() user: Record<string, string>, @Param('id') id: string) {
-    return this.classService.delClassService({ userId: user?.id, id });
+  async delClassController(
+    @CurrentUser() user: Record<string, string>,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.classService.delClassService({ userId: user?.id, role: user?.role, id });
   }
 }

@@ -282,4 +282,27 @@ export const ERROR_TRANSLATIONS = {
   // Hasher
   FAILED_TO_HASH_DATA: { vi: 'Băm dữ liệu thất bại', en: 'Failed to hash data' },
   FAILED_TO_VERIFY_DATA: { vi: 'Xác minh dữ liệu thất bại', en: 'Failed to verify data' },
+
+  // Tutor-service additions (ownership, time ranges, chat policy, session check)
+  TIME_RANGE_INVALID: {
+    vi: 'Giờ kết thúc phải sau giờ bắt đầu',
+    en: 'End time must be after start time',
+  },
+  LESSON_CHAPTER_MISMATCH: {
+    vi: 'Chương không thuộc chương trình học đã chọn',
+    en: 'Chapter does not belong to the selected curriculum',
+  },
+  CHAT_PERMISSION_DENIED: {
+    vi: 'Không có quyền trò chuyện với người dùng này',
+    en: 'You are not allowed to chat with this user',
+  },
+  CHAT_DIRECT_NO_ADD_PARTICIPANT: {
+    vi: 'Không thể thêm thành viên vào cuộc trò chuyện trực tiếp',
+    en: 'Cannot add participants to a direct conversation',
+  },
+  SESSION_CHECK_UNAVAILABLE: {
+    vi: 'Không thể xác minh phiên đăng nhập, vui lòng thử lại',
+    en: 'Unable to verify your session, please try again',
+  },
+  SESSION_REVOKED: { vi: 'Phiên đăng nhập đã kết thúc', en: 'Session has ended' },
 } as const satisfies TranslationDict;

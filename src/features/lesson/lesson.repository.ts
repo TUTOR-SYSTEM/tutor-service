@@ -3,7 +3,7 @@ import { DRIZZLE } from 'src/database/database.module';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { v4 as uuidv4 } from 'uuid';
 import { type CreateLessonBodyDto, type UpdateLessonDto } from '@packages/entities';
-import { lessons } from 'src/database/schema';
+import { chapters, lessons } from 'src/database/schema';
 import { and, count, eq } from 'drizzle-orm';
 
 @Injectable()
@@ -81,6 +81,22 @@ export class LessonRepository {
   async findById(id: string) {
     const [lesson] = await this.db.select().from(lessons).where(eq(lessons.id, id)).limit(1);
     return lesson ?? null;
+  }
+
+  // true when the chapter exists and belongs to the given curriculum
+  async chapterInCurriculum({
+    chapterId,
+    curriculumId,
+  }: {
+    chapterId: string;
+    curriculumId: string;
+  }): Promise<boolean> {
+    const [row] = await this.db
+      .select({ id: chapters.id })
+      .from(chapters)
+      .where(and(eq(chapters.id, chapterId), eq(chapters.curriculumId, curriculumId)))
+      .limit(1);
+    return !!row;
   }
 
   async update(id: string, data: UpdateLessonDto) {

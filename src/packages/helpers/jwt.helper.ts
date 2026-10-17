@@ -27,6 +27,8 @@ export type JwtAccessPayload = {
   email: string;
   typ: 'access';
   role: JwtUserRole;
+  /** login session id; the session must still exist in redis (CONTRACT C1) */
+  sid: string;
 };
 
 export type JwtRefreshPayload = {
@@ -47,7 +49,7 @@ export type JwtTokensConfig = {
 
 export async function signAccessToken(
   jwtService: JwtSignContract,
-  payload: Pick<JwtAccessPayload, 'sub' | 'email' | 'role'>,
+  payload: Pick<JwtAccessPayload, 'sub' | 'email' | 'role' | 'sid'>,
   config: JwtTokensConfig,
 ): Promise<string> {
   const body: JwtAccessPayload = { ...payload, typ: 'access' };

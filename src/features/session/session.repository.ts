@@ -76,7 +76,15 @@ export class SessionRepository {
   }
 
   // list every session across the classes the user owns (tutor) or is enrolled in (student)
-  async getAll({ userId, query }: { userId: string; query: GetSessionsQueryDto }) {
+  async getAll({
+    userId,
+    role,
+    query,
+  }: {
+    userId: string;
+    role?: string | null;
+    query: GetSessionsQueryDto;
+  }) {
     const { page = 1, limit = 10, search, status, classId, startDate, endDate } = query;
 
     const ownedClassIds = this.db
@@ -99,10 +107,11 @@ export class SessionRepository {
       },
     });
 
-    const accessWhere = or(
-      inArray(sessions.classId, ownedClassIds),
-      inArray(sessions.classId, enrolledClassIds),
-    );
+    // ADMIN sees every session; everyone else sees owned or enrolled classes only
+    const accessWhere =
+      role === 'ADMIN'
+        ? undefined
+        : or(inArray(sessions.classId, ownedClassIds), inArray(sessions.classId, enrolledClassIds));
     // Dates arrive as ISO strings after the RPC JSON round trip; drizzle's `timestamp` columns
     // call `toISOString()` on the bound value, so convert first (same rule as the write paths).
     const from = toDate(startDate);

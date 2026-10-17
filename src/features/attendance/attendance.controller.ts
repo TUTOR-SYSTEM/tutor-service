@@ -14,6 +14,7 @@ import { upsertAttendanceSchema, type UpsertAttendanceDto } from '@packages/enti
 import { AttendanceService } from './attendance.service';
 import { ATTENDANCE_SWAGGER_MESSAGES } from 'src/data/swaggers/messages';
 import { ATTENDANCE_SWAGGERS_DATA } from 'src/data/swaggers/data/attendance.swagger';
+import { ParseUUIDPipe } from '@nestjs/common';
 
 @ApiTags('Attendance')
 @ApiBearerAuth('access-token')
@@ -33,8 +34,15 @@ export class AttendanceController {
     status: StatusCodes.OK,
     description: ATTENDANCE_SWAGGER_MESSAGES.GET_ATTENDANCE_SUCCESSFULLY,
   })
-  getBySession(@CurrentUser() user: Record<string, string>, @Param('sessionId') sessionId: string) {
-    return this.attendanceService.getBySessionService({ userId: user?.id, sessionId });
+  getBySession(
+    @CurrentUser() user: Record<string, string>,
+    @Param('sessionId', ParseUUIDPipe) sessionId: string,
+  ) {
+    return this.attendanceService.getBySessionService({
+      userId: user?.id,
+      role: user?.role,
+      sessionId,
+    });
   }
 
   // todo : tutor marks/updates one student's attendance for a session (upsert) ...
@@ -54,6 +62,10 @@ export class AttendanceController {
     @Body(new ZodValidationPipe<UpsertAttendanceDto>(upsertAttendanceSchema))
     dto: UpsertAttendanceDto,
   ) {
-    return this.attendanceService.upsertAttendanceService({ userId: user?.id, data: dto });
+    return this.attendanceService.upsertAttendanceService({
+      userId: user?.id,
+      role: user?.role,
+      data: dto,
+    });
   }
 }

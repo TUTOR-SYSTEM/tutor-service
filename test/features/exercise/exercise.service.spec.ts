@@ -11,6 +11,7 @@ import { ExerciseRepository } from 'src/features/exercise/exercise.repository';
 import { UserService } from 'src/features/user/user.service';
 import { SessionService } from 'src/features/session/session.service';
 import { LessonService } from 'src/features/lesson/lesson.service';
+import { ClassService } from 'src/features/class/class.service';
 
 // session/lesson services transitively load an ESM-only dep (uuid) via their repositories;
 // this spec only needs the tokens, so swap the modules for bare classes
@@ -18,6 +19,7 @@ jest.mock('src/features/session/session.service', () => ({
   SessionService: class SessionService {},
 }));
 jest.mock('src/features/lesson/lesson.service', () => ({ LessonService: class LessonService {} }));
+jest.mock('src/features/class/class.service', () => ({ ClassService: class ClassService {} }));
 
 const STUDENT_ID = '11111111-1111-4111-8111-111111111111';
 const TUTOR_ID = '22222222-2222-4222-8222-222222222222';
@@ -25,13 +27,15 @@ const OTHER_ID = '33333333-3333-4333-8333-333333333333';
 const SESSION_ID = '44444444-4444-4444-8444-444444444444';
 const LESSON_ID = '55555555-5555-4555-8555-555555555555';
 const EXERCISE_ID = '66666666-6666-4666-8666-666666666666';
+const CLASS_ID = '77777777-7777-4777-8777-777777777777';
 
 describe('ExerciseService', () => {
   let service: ExerciseService;
   let repo: Record<string, jest.Mock>;
-  let userService: { userExists: jest.Mock };
+  let userService: { getUserRolesByIds: jest.Mock };
   let sessionService: { getSessionService: jest.Mock };
   let lessonService: { getLessonByIdService: jest.Mock };
+  let classService: { isStudentInClassService: jest.Mock };
 
   const baseCreate = {
     studentId: STUDENT_ID,
@@ -48,13 +52,20 @@ describe('ExerciseService', () => {
       findByStudentSession: jest.fn().mockResolvedValue(null),
       update: jest.fn(),
     };
-    userService = { userExists: jest.fn().mockResolvedValue(true) };
+    // parties hold the right roles: the tutor teaches, the student is a STUDENT
+    userService = {
+      getUserRolesByIds: jest.fn().mockResolvedValue([
+        { id: TUTOR_ID, role: 'TUTOR' },
+        { id: STUDENT_ID, role: 'STUDENT' },
+      ]),
+    };
     // the session's class is taught by TUTOR_ID (the grader named in `baseCreate`)
     sessionService = {
       getSessionService: jest
         .fn()
-        .mockResolvedValue({ id: SESSION_ID, class: { tutorId: TUTOR_ID } }),
+        .mockResolvedValue({ id: SESSION_ID, classId: CLASS_ID, class: { tutorId: TUTOR_ID } }),
     };
+    classService = { isStudentInClassService: jest.fn().mockResolvedValue(true) };
     lessonService = { getLessonByIdService: jest.fn().mockResolvedValue({ id: LESSON_ID }) };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -64,6 +75,7 @@ describe('ExerciseService', () => {
         { provide: UserService, useValue: userService },
         { provide: SessionService, useValue: sessionService },
         { provide: LessonService, useValue: lessonService },
+        { provide: ClassService, useValue: classService },
       ],
     }).compile();
 
@@ -113,6 +125,7 @@ describe('ExerciseService', () => {
     it("forbids naming a tutor who doesn't teach the session's class", async () => {
       sessionService.getSessionService.mockResolvedValue({
         id: SESSION_ID,
+        classId: CLASS_ID,
         class: { tutorId: OTHER_ID },
       });
 
@@ -123,7 +136,7 @@ describe('ExerciseService', () => {
     });
 
     it('rejects when the student or tutor does not exist', async () => {
-      userService.userExists.mockImplementation(async (id: string) => id !== STUDENT_ID);
+      userService.getUserRolesByIds.mockResolvedValue([{ id: TUTOR_ID, role: 'TUTOR' }]);
 
       await expect(
         service.createExerciseService({ userId: STUDENT_ID, data: baseCreate as never }),
@@ -272,6 +285,7 @@ describe('ExerciseService', () => {
       expect(repo.update).toHaveBeenCalledWith({
         id: EXERCISE_ID,
         data: { exerciseUrls: ['https://files/a.pdf'], status: 'SUBMITTED' },
+        notStatus: 'GRADED',
       });
     });
 

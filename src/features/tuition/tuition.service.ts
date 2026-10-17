@@ -6,19 +6,20 @@ import type {
   UpdateTuitionDto,
 } from '@packages/entities/tuition';
 import { TuitionRepository } from './tuition.repository';
-import { checkUuidValid } from '@packages/helpers';
+import { canActOnOwned, checkUuidValid } from '@packages/helpers';
 
 @Injectable()
 export class TuitionService {
   private readonly logger = new Logger(TuitionService.name);
   constructor(private readonly repo: TuitionRepository) {}
 
-  async create(dto: CreateTuitionDto, tutorId: string) {
+  async create(dto: CreateTuitionDto, tutorId: string, role?: string | null) {
     if (!tutorId || !checkUuidValid({ data: tutorId }))
       throw new BadRequestException(ERROR_MESSAGES.TUTOR_ID_INVALID);
     if (!dto.classId || !checkUuidValid({ data: dto.classId }))
       throw new BadRequestException(ERROR_MESSAGES.CLASS_ID_INVALID);
-    if ((await this.repo.getClassTutorId(dto.classId)) !== tutorId) {
+    const classTutorId = await this.repo.getClassTutorId(dto.classId);
+    if (!classTutorId || !canActOnOwned({ userId: tutorId, role }, classTutorId)) {
       throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
     }
     // the tuition must belong to a student actually enrolled in this tutor's class; otherwise the
@@ -37,28 +38,36 @@ export class TuitionService {
   }
 
   // scoped to the acting user: the student of a record, or the tutor of its class
-  async findAll({ userId, query }: { userId: string; query: GetTuitionsQueryDto }) {
+  async findAll({
+    userId,
+    role,
+    query,
+  }: {
+    userId: string;
+    role?: string | null;
+    query: GetTuitionsQueryDto;
+  }) {
     this.assertUserId(userId);
-    return this.repo.findAll({ userId, query });
+    return this.repo.findAll({ userId, role, query });
   }
 
-  async findById({ userId, id }: { userId: string; id: string }) {
+  async findById({ userId, role, id }: { userId: string; role?: string | null; id: string }) {
     this.assertUserId(userId);
     if (!id || !checkUuidValid({ data: id }))
       throw new BadRequestException(ERROR_MESSAGES.ID_MUST_BE_UUID);
-    const tuition = await this.repo.findById(id, userId);
+    const tuition = await this.repo.findById(id, userId, role);
     if (!tuition) throw new NotFoundException(ERROR_MESSAGES.TUITION_RECORD_NOT_FOUND);
     return tuition;
   }
 
-  async update(id: string, dto: UpdateTuitionDto, tutorId: string) {
+  async update(id: string, dto: UpdateTuitionDto, tutorId: string, role?: string | null) {
     if (!id || !checkUuidValid({ data: id }))
       throw new BadRequestException(ERROR_MESSAGES.ID_MUST_BE_UUID);
     if (!tutorId || !checkUuidValid({ data: tutorId }))
       throw new BadRequestException(ERROR_MESSAGES.TUTOR_ID_INVALID);
     const owner = await this.repo.findOwnerById(id);
     if (!owner) throw new NotFoundException(ERROR_MESSAGES.TUITION_RECORD_NOT_FOUND);
-    if (owner.tutorId !== tutorId) {
+    if (!canActOnOwned({ userId: tutorId, role }, owner.tutorId)) {
       throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
     }
     // Dashboard revenue is bucketed by `paidDate`, so marking PAID without one would make the
@@ -70,24 +79,32 @@ export class TuitionService {
     return updated;
   }
 
-  async delete(id: string, tutorId: string) {
+  async delete(id: string, tutorId: string, role?: string | null) {
     if (!id || !checkUuidValid({ data: id }))
       throw new BadRequestException(ERROR_MESSAGES.ID_MUST_BE_UUID);
     if (!tutorId || !checkUuidValid({ data: tutorId }))
       throw new BadRequestException(ERROR_MESSAGES.TUTOR_ID_INVALID);
     const owner = await this.repo.findOwnerById(id);
     if (!owner) throw new NotFoundException(ERROR_MESSAGES.TUITION_RECORD_NOT_FOUND);
-    if (owner.tutorId !== tutorId) {
+    if (!canActOnOwned({ userId: tutorId, role }, owner.tutorId)) {
       throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
     }
     await this.repo.delete(id);
     return { id };
   }
 
-  async getSummary({ userId, classId }: { userId: string; classId?: string }) {
+  async getSummary({
+    userId,
+    role,
+    classId,
+  }: {
+    userId: string;
+    role?: string | null;
+    classId?: string;
+  }) {
     this.assertUserId(userId);
     if (classId && !checkUuidValid({ data: classId }))
       throw new BadRequestException(ERROR_MESSAGES.CLASS_ID_INVALID);
-    return this.repo.getSummary({ userId, classId });
+    return this.repo.getSummary({ userId, role, classId });
   }
 }
