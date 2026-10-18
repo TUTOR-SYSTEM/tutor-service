@@ -1,4 +1,4 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ERROR_MESSAGES } from 'src/data/constants';
 import { SessionService } from 'src/features/session/session.service';
@@ -36,6 +36,7 @@ describe('SessionService', () => {
       isParentOfEnrolled: jest.fn().mockResolvedValue(false),
       update: jest.fn(),
       del: jest.fn(),
+      findTakenSessionNumbers: jest.fn().mockResolvedValue([]),
     };
     // the class row carries its tutor: that is the default session tutor
     classService = {
@@ -426,6 +427,100 @@ describe('SessionService', () => {
         new BadRequestException(ERROR_MESSAGES.SESSION_ID_MUST_BE_UUID),
       );
       expect(repo.getDetailById).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('sessionNumber uniqueness within a class', () => {
+    it('createSessionService rejects a sessionNumber already used in the class, without inserting', async () => {
+      repo.findTakenSessionNumbers.mockResolvedValue([3]);
+
+      await expect(
+        service.createSessionService({
+          userId: USER_ID,
+          data: { classId: CLASS_ID, sessionNumber: 3 } as never,
+        }),
+      ).rejects.toThrow(new ConflictException(ERROR_MESSAGES.SESSION_NUMBER_DUPLICATE));
+      expect(repo.findTakenSessionNumbers).toHaveBeenCalledWith({
+        classId: CLASS_ID,
+        numbers: [3],
+      });
+      expect(repo.create).not.toHaveBeenCalled();
+    });
+
+    it('createSessionService inserts when the sessionNumber is free in the class', async () => {
+      repo.create.mockResolvedValue({ id: SESSION_ID });
+
+      await service.createSessionService({
+        userId: USER_ID,
+        data: { classId: CLASS_ID, sessionNumber: 4 } as never,
+      });
+
+      expect(repo.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('createSessionsService rejects two items with the same sessionNumber in one payload', async () => {
+      await expect(
+        service.createSessionsService({
+          userId: USER_ID,
+          data: {
+            classId: CLASS_ID,
+            sessions: [{ sessionNumber: 1 }, { sessionNumber: 2 }, { sessionNumber: 1 }],
+          } as never,
+        }),
+      ).rejects.toThrow(new ConflictException(ERROR_MESSAGES.SESSION_NUMBER_DUPLICATE));
+      expect(repo.createMany).not.toHaveBeenCalled();
+    });
+
+    it('createSessionsService rejects a batch whose sessionNumber is already stored in the class', async () => {
+      repo.findTakenSessionNumbers.mockResolvedValue([2]);
+
+      await expect(
+        service.createSessionsService({
+          userId: USER_ID,
+          data: {
+            classId: CLASS_ID,
+            sessions: [{ sessionNumber: 1 }, { sessionNumber: 2 }],
+          } as never,
+        }),
+      ).rejects.toThrow(new ConflictException(ERROR_MESSAGES.SESSION_NUMBER_DUPLICATE));
+      expect(repo.findTakenSessionNumbers).toHaveBeenCalledWith({
+        classId: CLASS_ID,
+        numbers: [1, 2],
+      });
+      expect(repo.createMany).not.toHaveBeenCalled();
+    });
+
+    it('updateSessionService rejects moving a session onto a number another session holds', async () => {
+      repo.getById.mockResolvedValue({ id: SESSION_ID, classId: CLASS_ID, sessionNumber: 1 });
+      repo.findTakenSessionNumbers.mockResolvedValue([5]);
+
+      await expect(
+        service.updateSessionService({
+          userId: USER_ID,
+          id: SESSION_ID,
+          data: { sessionNumber: 5 } as never,
+        }),
+      ).rejects.toThrow(new ConflictException(ERROR_MESSAGES.SESSION_NUMBER_DUPLICATE));
+      expect(repo.findTakenSessionNumbers).toHaveBeenCalledWith({
+        classId: CLASS_ID,
+        numbers: [5],
+        excludeId: SESSION_ID,
+      });
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('updateSessionService skips the check when sessionNumber is unchanged', async () => {
+      repo.getById.mockResolvedValue({ id: SESSION_ID, classId: CLASS_ID, sessionNumber: 1 });
+      repo.update.mockResolvedValue({ id: SESSION_ID });
+
+      await service.updateSessionService({
+        userId: USER_ID,
+        id: SESSION_ID,
+        data: { sessionNumber: 1 } as never,
+      });
+
+      expect(repo.findTakenSessionNumbers).not.toHaveBeenCalled();
+      expect(repo.update).toHaveBeenCalledTimes(1);
     });
   });
 

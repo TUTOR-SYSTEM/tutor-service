@@ -71,14 +71,17 @@ export class DashboardService {
     return x;
   }
 
-  async getOverview(userId: string): Promise<DashboardOverview> {
+  // `role` is the JWT role the gateway forwards; the DB lookup only runs when a caller omits it
+  async getOverview(userId: string, requestedRole?: string | null): Promise<DashboardOverview> {
     if (!userId || !checkUuidValid({ data: userId }))
       throw new BadRequestException(ERROR_MESSAGES.USER_ID_MUST_BE_UUID);
 
-    const user = await this.userService.getUserRoleById(userId);
-    if (!user) throw new NotFoundException(ERROR_MESSAGES.USER_NOT_FOUND);
-
-    const role = user.role ?? 'STUDENT';
+    let role = requestedRole;
+    if (!role) {
+      const user = await this.userService.getUserRoleById(userId);
+      if (!user) throw new NotFoundException(ERROR_MESSAGES.USER_NOT_FOUND);
+      role = user.role ?? 'STUDENT';
+    }
     const isStudent = role === 'STUDENT';
 
     const scope = isStudent

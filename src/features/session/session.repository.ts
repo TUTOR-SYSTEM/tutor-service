@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, count, desc, eq, gte, inArray, lte, or } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gte, inArray, lte, ne, or } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { DRIZZLE } from '../../database/database.module';
 import {
@@ -165,6 +165,29 @@ export class SessionRepository {
       .from(sessions)
       .where(eq(sessions.classId, classId))
       .orderBy(asc(sessions.sessionNumber), asc(sessions.startAt));
+  }
+
+  // session numbers already used in the class (optionally ignoring one session, for updates)
+  async findTakenSessionNumbers({
+    classId,
+    numbers,
+    excludeId,
+  }: {
+    classId: string;
+    numbers: number[];
+    excludeId?: string;
+  }) {
+    const rows = await this.db
+      .select({ sessionNumber: sessions.sessionNumber })
+      .from(sessions)
+      .where(
+        and(
+          eq(sessions.classId, classId),
+          inArray(sessions.sessionNumber, numbers),
+          excludeId ? ne(sessions.id, excludeId) : undefined,
+        ),
+      );
+    return rows.map((row) => row.sessionNumber);
   }
 
   async getById({ id }: { id: string }) {

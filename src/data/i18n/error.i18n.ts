@@ -179,6 +179,10 @@ export const ERROR_TRANSLATIONS = {
 
   // Session
   SESSION_NOT_FOUND: { vi: 'Không tìm thấy buổi học', en: 'Session not found' },
+  SESSION_NUMBER_DUPLICATE: {
+    vi: 'Số buổi học này đã tồn tại trong lớp',
+    en: 'Session number already exists in this class',
+  },
 
   // Attendance
   ATTENDANCE_MARK_NOT_ALLOWED: {

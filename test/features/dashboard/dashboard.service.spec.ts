@@ -138,6 +138,23 @@ describe('DashboardService', () => {
     });
   });
 
+  describe('role resolution', () => {
+    it('uses the role the gateway forwarded from the JWT and skips the role query', async () => {
+      user.getUserRoleById.mockResolvedValue({ id: USER_ID, role: 'TUTOR' });
+
+      await service.getOverview(USER_ID, 'STUDENT');
+
+      expect(user.getUserRoleById).not.toHaveBeenCalled();
+      expect(repo.studentClassScope).toHaveBeenCalledWith(USER_ID);
+    });
+
+    it('looks the role up when the caller does not pass one', async () => {
+      await service.getOverview(USER_ID);
+
+      expect(user.getUserRoleById).toHaveBeenCalledWith(USER_ID);
+    });
+  });
+
   describe('student overview', () => {
     beforeEach(() => {
       user.getUserRoleById.mockResolvedValue({ id: USER_ID, role: 'STUDENT' });

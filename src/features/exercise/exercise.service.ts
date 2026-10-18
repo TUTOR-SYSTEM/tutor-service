@@ -220,6 +220,7 @@ export class ExerciseService {
       throw new ForbiddenException(ERROR_MESSAGES.EXERCISE_GRADE_NOT_ALLOWED);
     }
 
+    // intentional: the assigned tutor may re-grade an already GRADED exercise to correct a score
     const graded = await this.repo.update({
       id,
       data: {

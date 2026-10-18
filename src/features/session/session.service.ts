@@ -1,4 +1,10 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { ERROR_MESSAGES } from 'src/data/constants';
 import {
   CreateSessionDto,
@@ -58,6 +64,29 @@ export class SessionService {
     classId: string;
   }) {
     return this.classService.getOwnedClassService({ userId, role, id: classId });
+  }
+
+  // sessionNumber is unique per class (enforced here, not by a DB constraint: existing rows may
+  // already collide). Rejects numbers already stored in the class and duplicates inside a payload.
+  private async assertSessionNumbersFree({
+    classId,
+    numbers,
+    excludeId,
+  }: {
+    classId: string;
+    numbers: number[];
+    excludeId?: string;
+  }) {
+    const requested = numbers.filter((n) => n !== undefined && n !== null);
+    if (new Set(requested).size !== requested.length)
+      throw new ConflictException(ERROR_MESSAGES.SESSION_NUMBER_DUPLICATE);
+    if (requested.length === 0) return;
+    const taken = await this.repo.findTakenSessionNumbers({
+      classId,
+      numbers: requested,
+      excludeId,
+    });
+    if (taken.length > 0) throw new ConflictException(ERROR_MESSAGES.SESSION_NUMBER_DUPLICATE);
   }
 
   // session.startAt / endAt arrive as ISO strings over RMQ; the end must be after the start
@@ -120,6 +149,7 @@ export class SessionService {
 
     this.assertSessionTimeRange(data.startAt, data.endAt);
     const classData = await this.assertClassOwner({ userId, role, classId: data.classId });
+    await this.assertSessionNumbersFree({ classId: data.classId, numbers: [data.sessionNumber] });
     const refs = await this.resolveSessionRefs({
       defaultTutorId: classData.tutorId,
       lessonId: data.lessonId,
@@ -144,6 +174,10 @@ export class SessionService {
     for (const session of data.sessions)
       this.assertSessionTimeRange(session.startAt, session.endAt);
     const classData = await this.assertClassOwner({ userId, role, classId: data.classId });
+    await this.assertSessionNumbersFree({
+      classId: data.classId,
+      numbers: data.sessions.map((session) => session.sessionNumber),
+    });
     // resolve each distinct lesson/tutor once, not once per session
     const refCache = new Map<string, Promise<{ lessonId: string | null; tutorId: string }>>();
     const resolveRefs = (lessonId?: string | null, tutorId?: string | null) => {
@@ -250,6 +284,13 @@ export class SessionService {
     const current = await this.loadOwnedSession({ userId, role, id });
     // partial update: check the new bounds against the stored ones
     this.assertSessionTimeRange(data.startAt ?? current.startAt, data.endAt ?? current.endAt);
+
+    if (data.sessionNumber !== undefined && data.sessionNumber !== current.sessionNumber)
+      await this.assertSessionNumbersFree({
+        classId: current.classId,
+        numbers: [data.sessionNumber],
+        excludeId: id,
+      });
 
     // re-validate changed FKs exactly as create does
     if (data.lessonId !== undefined || data.tutorId !== undefined) {
