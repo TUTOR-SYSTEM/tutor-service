@@ -5,7 +5,7 @@
 **Education-domain** microservice of a tutoring-platform backend split into 4 independent
 NestJS services: `gateway` (HTTP-facing), `user` (auth/user/admin/student), `tutor-service`
 (this repo — classes, scheduling, curriculum), `third-service` (notification/email/upload).
-Built with **NestJS 11** + **TypeScript**, **PostgreSQL** (Drizzle ORM), no HTTP traffic from
+Built with **NestJS 11** + **TypeScript**, **PostgreSQL** (Prisma ORM), no HTTP traffic from
 end users directly — reached only via `gateway`, over RPC (see "RPC status" below).
 
 This repo previously described a personal-finance app ("My Finance Tracker" —
@@ -47,7 +47,7 @@ already kept in sync with the real domain — this `CLAUDE.md` was not, until no
 | ---------------- | --------------------------------------------------------- |
 | Framework        | NestJS 11                                                |
 | Language         | TypeScript 5 (strictNullChecks only)                     |
-| Database         | PostgreSQL via Drizzle ORM (`postgres.js`/`pg` drivers)  |
+| Database         | PostgreSQL via Prisma ORM (`@prisma/client`, schema in `prisma/schema.prisma`) |
 | Inter-service    | RabbitMQ — `@nestjs/microservices` RMQ listener on `tutor_queue` is wired up in `main.ts` and every feature except `chat`/`user` has a `{name}.rpc.controller.ts` responder (12 features — see architecture.md) |
 | Authentication   | Passport JWT (access + refresh), same secrets as `gateway`/`user` |
 | Validation       | Zod v4 (via custom `ZodValidationPipe`)                  |
@@ -85,9 +85,14 @@ bun run test:cov          # Unit tests with coverage
 bun run test:e2e          # E2E tests
 bun run test:debug        # Debug tests with inspect
 
-# Database (Drizzle) — schema + migrations now live in ../gateway (2026-09-28 consolidation).
-# This repo has no local db:generate/db:migrate/db:push/db:studio anymore; run those from
-# gateway. See `.claude/rules/database.md`.
+# Database (Prisma) — schema in prisma/schema.prisma, migrations in prisma/migrations/
+bun run db:generate       # prisma generate (also runs on `bun install` via postinstall)
+bun run db:migrate        # prisma migrate deploy (apply pending migrations)
+bun run db:migrate:dev    # prisma migrate dev (create + apply a migration from schema changes)
+bun run db:baseline       # prisma migrate resolve --applied 0_init (existing DB built by drizzle-kit)
+bun run db:push           # prisma db push (dev only)
+bun run db:studio         # prisma studio
+# See `.claude/rules/database.md`.
 
 # Database Seeds (scripts/*.ts, Bun runtime)
 bun run db:seed:user / users-bulk / categories / grades / wallet / edu-flow / dashboard / curriculum-demo
@@ -102,7 +107,7 @@ bun podman:up / podman:down / podman:logs
 ## Project Structure
 
 Gotchas:
-- No local `schema.ts` or `drizzle.config.ts`: the schema is imported from `@tutor/gateway/schema` (`../gateway`, canonical since 2026-09-28).
+- Schema: `prisma/schema.prisma` (models PascalCase, `@map`/`@@map` keep the original snake_case table/column/enum names). It mirrors the former Drizzle schema from `../gateway` 1:1. Inject `PrismaService` (`src/database/prisma.service.ts`, global via `DatabaseModule`) — the old `DRIZZLE` token is gone.
 - Tables this repo owns: classes, class_students, schedules, class_sessions, curriculums, chapters, lessons, tuitions, student_scores, ai_messages, attendances, exercises, conversations, conversation_participants, messages. `users`/`grades` belong to `user`; `notifications` belongs to `third-service`.
 - `features/` covers class, schedule, session, curriculum, chapter, lesson, tuition, exercise, attendance, chat, report, dashboard, agents, user.
 
@@ -118,7 +123,7 @@ single-quote/100-width style enforced by a PostToolUse hook.
 
 1. Request → Global `JwtAuthGuard` (unless `@Public()`)
 2. Controller validates body via `ZodValidationPipe` (Zod schema)
-3. Service → Repository → Drizzle ORM → PostgreSQL
+3. Service → Repository → Prisma Client → PostgreSQL
 4. `ResponseInterceptor` wraps the response:
    ```json
    { "statusCode": 200, "message": "Success", "data": { ... }, "timestamp": "...", "method": "POST", "path": "/classes" }
@@ -165,8 +170,8 @@ despite the matching packages being installed — don't add them to `.env` specu
 
 Configured in `.claude/settings.json` (scripts in `.claude/hooks/`):
 
-- **PreToolUse (Write|Edit)** → `guard-paths.mjs` blocks edits to `.env*` and generated
-  `drizzle/**` files.
+- **PreToolUse (Write|Edit)** → `guard-paths.mjs` blocks edits to `.env*` and applied
+  `prisma/migrations/**` files.
 - **PostToolUse (Write|Edit)** → `format-ts.mjs` runs prettier + eslint `--fix` on the
   touched `.ts/.js` file.
 - **Stop** → `review-skills.mjs` runs after each task that changed `src/`, and asks Claude to

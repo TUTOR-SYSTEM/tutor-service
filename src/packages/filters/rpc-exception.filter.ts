@@ -22,11 +22,23 @@ const PG_CLIENT_ERRORS: Record<string, { status: number; message: string }> = {
 
 const logger = new Logger('RpcExceptionFilter');
 
-/** drizzle wraps the driver error in `cause`; check both levels for a 5-char SQLSTATE. */
+/**
+ * Prisma reports constraint failures with its own `P2xxx` codes; translate them to the SQLSTATE
+ * equivalents above so one table drives the 4xx mapping.
+ */
+const PRISMA_TO_PG: Record<string, string> = {
+  P2002: '23505', // unique constraint
+  P2003: '23503', // foreign key constraint
+  P2023: '22P02', // malformed value (e.g. a non-UUID id)
+};
+
+/** A 5-char SQLSTATE (also looked up on `cause`), or the SQLSTATE a Prisma error code maps to. */
 function pgErrorCode(exception: unknown): string | undefined {
   for (const candidate of [exception, (exception as { cause?: unknown })?.cause]) {
     const code = (candidate as { code?: unknown } | undefined)?.code;
-    if (typeof code === 'string' && /^[0-9A-Z]{5}$/.test(code)) return code;
+    if (typeof code !== 'string') continue;
+    if (PRISMA_TO_PG[code]) return PRISMA_TO_PG[code];
+    if (/^[0-9A-Z]{5}$/.test(code)) return code;
   }
   return undefined;
 }

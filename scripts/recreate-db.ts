@@ -9,7 +9,7 @@
  * Usage: bun scripts/recreate-db.ts --confirm=<database name>
  */
 import 'dotenv/config';
-import postgres from 'postgres';
+import { createPrisma } from './lib/prisma';
 import { execSync } from 'node:child_process';
 
 function resolveDatabaseUrl(): string {
@@ -51,37 +51,38 @@ async function main(): Promise<void> {
   const url = resolveDatabaseUrl();
   assertSafeToRecreate(url);
   console.log(`Recreating database "${databaseName(url)}"…`);
-  const sql = postgres(url);
+  const prisma = createPrisma();
 
   console.log('Dropping all tables…');
   // Drop tables with CASCADE to remove FK dependencies
-  const tables = await sql<Array<{ tablename: string }>>`
+  const tables = await prisma.$queryRaw<Array<{ tablename: string }>>`
     SELECT tablename FROM pg_tables
     WHERE schemaname = 'public'
     ORDER BY tablename
   `;
   for (const t of tables) {
-    await sql.unsafe(`DROP TABLE IF EXISTS "${t.tablename}" CASCADE`);
+    // identifiers come from pg_tables, never from user input
+    await prisma.$executeRawUnsafe(`DROP TABLE IF EXISTS "${t.tablename}" CASCADE`);
   }
   console.log(`  Dropped ${tables.length} table(s)`);
 
   // Drop all custom enum types
-  const enums = await sql<Array<{ typname: string }>>`
+  const enums = await prisma.$queryRaw<Array<{ typname: string }>>`
     SELECT t.typname
     FROM pg_type t
     JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace
     WHERE n.nspname = 'public' AND t.typtype = 'e'
   `;
   for (const e of enums) {
-    await sql.unsafe(`DROP TYPE IF EXISTS "${e.typname}" CASCADE`);
+    await prisma.$executeRawUnsafe(`DROP TYPE IF EXISTS "${e.typname}" CASCADE`);
   }
   console.log(`  Dropped ${enums.length} enum(s)`);
 
-  await sql.end({ timeout: 5 });
+  await prisma.$disconnect();
 
-  // Push schema via drizzle-kit
-  console.log('\nPushing schema via drizzle-kit…');
-  execSync('bun x drizzle-kit push --config=drizzle.config.ts --force', {
+  // Recreate the schema from the Prisma migrations
+  console.log('\nApplying Prisma migrations…');
+  execSync('bunx prisma migrate deploy', {
     stdio: 'inherit',
   });
 

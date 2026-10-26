@@ -1,6 +1,6 @@
 ---
 name: generate-repository
-description: Scaffold the repository layer (src/features/{name}/{name}.repository.ts) — Drizzle DB access with DRIZZLE injection, CRUD + paginated list using buildListWhereClause. Use when asked to create/add a repository or data-access layer for a feature in this NestJS tutoring backend.
+description: Scaffold the repository layer (src/features/{name}/{name}.repository.ts) — Prisma DB access via PrismaService, CRUD + paginated list using buildListWhereClause. Use when asked to create/add a repository or data-access layer for a feature in this NestJS tutoring backend.
 ---
 
 # Generate Repository
@@ -8,66 +8,69 @@ description: Scaffold the repository layer (src/features/{name}/{name}.repositor
 Create `src/features/foo/foo.repository.ts`, mirroring `class.repository.ts`.
 
 ## Prerequisites
-- The Drizzle table (e.g. `foos`) exists in `src/database/schema.ts`.
+- The Prisma model (e.g. `Foo`) exists in `prisma/schema.prisma` and `bun run db:generate` ran.
 - The DTOs exist under `@packages/entities/foo` (see `generate-entity`).
 
 ## Shape
 ```ts
-import { Inject, Injectable } from '@nestjs/common';
-import { and, count, eq } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/postgres-js';
-import { DRIZZLE } from '../../database/database.module';
+import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import { PrismaService, isRecordNotFound } from '../../database/prisma.service';
 import { CreateFooDto, GetFoosQueryDto } from '@packages/entities/foo';
-import { foos } from 'src/database/schema';
-import { buildListWhereClause } from '@packages/helpers';
+import { buildListWhereClause, buildPagination } from '@packages/helpers';
 
 @Injectable()
 export class FooRepository {
-  constructor(@Inject(DRIZZLE) private readonly db: ReturnType<typeof drizzle>) {}
+  constructor(private readonly prisma: PrismaService) {}
   // getFooByField, create, getFoos, getFoo, delFoo (+ update if needed)
 }
 ```
 
 ## Methods (copy exact shapes from class.repository.ts)
-- `getFooByField({ field, value })` → look up a single row via a `fieldMaps` object
-  (`{ id: foos.id, name: foos.name, code: foos.code }`), return the first row (used by the
-  service for duplicate / existence checks).
-- `create({ data })` → `.insert(foos).values({...}).returning()`, return first row. Map each
-  DTO field explicitly; `.toString()` numeric/`numeric`-column values (see `tuition`).
-- `getFoos({ userId, query })` → build the where with `buildListWhereClause({ search,
-  searchableColumns, filters, filterColumns })` (the object-shaped signature — see below),
-  AND in ownership/relation conditions, count total, then paged `.select().limit().offset()`.
-  Return `{ foos: rows, pagination: { total, page, limit, totalPages } }` — the list key is
-  named after the resource (e.g. `classes`), NOT `data`.
-- `getFoo({ id })` → `.where(eq(foos.id, id)).limit(1)`, return the row or `[]`.
-- `delFoo({ id })` → `.delete(...).returning()`, return a boolean (`!!row`).
+- `getFooByField({ field, value })` → whitelist the field (`['id', 'name', 'code']`), then
+  `this.prisma.foo.findFirst({ where: { [field]: value } })` (used by the service for duplicate /
+  existence checks). Returns the row or `null`.
+- `create({ data })` → `this.prisma.foo.create({ data: {...} })`. Map each DTO field explicitly;
+  `Decimal` columns accept a string/number (`data.tuition?.toString()`).
+- `getFoos({ userId, query })` → build the `where` with `buildListWhereClause({ search,
+  searchFields, filters })` (returns a Prisma `where` object or `undefined`), combine with the
+  ownership/relation condition in `AND: [...]`, then
+  `Promise.all([count({ where }), findMany({ where, take, skip })])`. Return
+  `{ foos: rows, pagination: buildPagination(total, page, limit) }` — the list key is named after
+  the resource (e.g. `classes`), NOT `data`.
+- `getFoo({ id })` → `findUnique({ where: { id } })`, return the row or `null`.
+- `update({ id, data })` → `prisma.foo.update(...)` inside try/catch; return `null` when
+  `isRecordNotFound(error)` (Prisma throws `P2025` for a missing row), rethrow otherwise.
+- `delFoo({ id })` → `const { count } = await prisma.foo.deleteMany({ where: { id } }); return count > 0`.
 
-## buildListWhereClause signature (object-shaped, from @packages/helpers)
+## buildListWhereClause signature (from @packages/helpers)
 ```ts
 const searchWhere = buildListWhereClause({
   search,
-  searchableColumns: { name: { column: foos.name }, code: { column: foos.code } },
-  filters: { status, subject },
-  filterColumns: { status: { column: foos.status }, subject: { column: foos.subject } },
-});
-const whereClause = and(...[searchWhere, eq(foos.tutorId, userId)].filter((c) => c !== undefined));
+  searchFields: ['name', 'code'],
+  filters: { status, subject }, // exact match; null/undefined are skipped
+}) as Prisma.FooWhereInput | undefined;
+const where: Prisma.FooWhereInput = { AND: [{ tutorId: userId }, ...(searchWhere ? [searchWhere] : [])] };
 ```
 
 ## Child-resource variants (see `schedule.repository.ts`)
 A child of `class` (e.g. `schedule`) has no owner column of its own, so it skips
-`buildListWhereClause` and lists by parent instead:
-- `createMany({ parentId, items })` → one `.insert(foos).values(items.map(...)).returning()`
+`buildListWhereClause` ownership and lists by parent instead:
+- `createMany({ parentId, items })` → one `prisma.foo.createManyAndReturn({ data: items.map(...) })`
   multi-row insert (never a loop of single inserts).
-- `getByParent({ parentId })` → `.where(eq(foos.parentId, parentId)).orderBy(...)`, return all rows.
+- `getByParent({ parentId })` → `findMany({ where: { parentId }, orderBy: [...] })`.
 - `getById({ id })`, `update({ id, data })`, `del({ id })` as usual.
+- Access through the parent in a list: `where: { class: { OR: [{ tutorId: userId }, { students: { some: { studentId: userId } } }] } }`.
 
 ## Unit test
 Put it in `test/features/{name}/{name}.repository.spec.ts`. Construct the repo directly with
-`createDrizzleMock()` from `test/support/drizzle.mock.ts`, queue one result per awaited query
-(`db.queue(rows)`), and assert filters with `renderSql(lastWhere(db))`. See
-`test/features/schedule/schedule.repository.spec.ts` as the reference.
+`createPrismaMock()` from `test/support/prisma.mock.ts` (`prisma.foo.findMany.mockResolvedValue(...)`)
+and assert the exact `where`/`data` passed. See `test/features/schedule/schedule.repository.spec.ts`
+as the reference. SQL-level behaviour (raw queries, cascades) can only be checked against a real
+Postgres.
 
 ## Rules
-- Never inline SQL string building — reuse `buildListWhereClause` from `@packages/helpers`.
+- Never inline SQL string building — reuse `buildListWhereClause`; raw SQL is `$queryRaw` tagged
+  templates only, with uuid params cast (`${id}::uuid`, `uuidList(ids)`).
 - Convert RPC date strings with `toDate()` on every insert/update (see `database.md`).
-- Map camelCase DTO fields to columns explicitly on insert; stringify `numeric` columns.
+- Map camelCase DTO fields to columns explicitly on insert.

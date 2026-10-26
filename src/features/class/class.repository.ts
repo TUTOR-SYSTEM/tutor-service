@@ -1,48 +1,45 @@
-import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, desc, eq, count, gte, inArray, lt, notInArray, type SQL } from 'drizzle-orm';
-import { alias } from 'drizzle-orm/pg-core';
-import { drizzle } from 'drizzle-orm/postgres-js';
-import { DRIZZLE } from '../../database/database.module';
+import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import { PrismaService, isRecordNotFound } from '../../database/prisma.service';
 import { CreateClassDto, GetClassesQueryDto, UpdateClassDto } from '@packages/entities/class';
-import {
-  chapters,
-  classes,
-  classStudents,
-  lessons,
-  schedules,
-  sessions,
-  tuitions,
-  users,
-} from 'src/database/schema';
-import { buildListWhereClause } from '@packages/helpers';
+import { buildListWhereClause, buildPagination } from '@packages/helpers';
 import { toDate } from '@packages/helpers/date.helper';
+
+const ENROLLED_STUDENT_SELECT = {
+  id: true,
+  firstName: true,
+  lastName: true,
+  email: true,
+  phone: true,
+  avatar: true,
+  userCode: true,
+  gender: true,
+  school: true,
+} satisfies Prisma.UserSelect;
+
+type EnrollmentWithStudent = Prisma.ClassStudentGetPayload<{
+  select: { createdAt: true; student: { select: typeof ENROLLED_STUDENT_SELECT } };
+}> & { classId?: string };
+
+const flattenEnrollment = ({ student, createdAt, ...rest }: EnrollmentWithStudent) => ({
+  ...rest,
+  ...student,
+  enrolledAt: createdAt,
+});
 
 @Injectable()
 export class ClassRepository {
-  constructor(
-    @Inject(DRIZZLE)
-    private readonly db: ReturnType<typeof drizzle>,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async getClassByField({ field, value }: { field: string; value: string }) {
-    const fieldMaps = {
-      id: classes.id,
-      name: classes.name,
-      code: classes.code,
-    } as const;
-
-    const [result] = await this.db
-      .select()
-      .from(classes)
-      .where(eq(fieldMaps[field], value ?? ''))
-      .limit(1);
-    return result;
+    const fields = ['id', 'name', 'code'];
+    if (!fields.includes(field)) return null;
+    return this.prisma.class.findFirst({ where: { [field]: value ?? '' } });
   }
 
   async create({ data }: { data: CreateClassDto }) {
-    const [classData] = await this.db
-      .insert(classes)
-      .values({
+    return this.prisma.class.create({
+      data: {
         name: data.name,
         code: data.code,
         subject: data.subject,
@@ -55,49 +52,46 @@ export class ClassRepository {
         location: data.location,
         curriculumId: data.curriculumId,
         tutorId: data.tutorId,
-      })
-      .returning();
-    return classData;
+      },
+    });
   }
 
   async update({ id, data }: { id: string; data: Omit<UpdateClassDto, 'studentIds'> }) {
-    const [classData] = await this.db
-      .update(classes)
-      .set({
-        ...(data.name !== undefined && { name: data.name }),
-        ...(data.code !== undefined && { code: data.code }),
-        ...(data.subject !== undefined && { subject: data.subject }),
-        ...(data.tuition !== undefined && { tuition: data.tuition.toString() }),
-        ...(data.description !== undefined && { description: data.description }),
-        ...(data.status !== undefined && { status: data.status }),
-        ...(data.format !== undefined && { format: data.format }),
-        ...(data.startTime !== undefined && { startTime: toDate(data.startTime) }),
-        ...(data.endTime !== undefined && { endTime: toDate(data.endTime) }),
-        ...(data.location !== undefined && { location: data.location }),
-        ...(data.curriculumId !== undefined && { curriculumId: data.curriculumId }),
-        updatedAt: new Date(),
-      })
-      .where(eq(classes.id, id))
-      .returning();
-    return classData ?? null;
+    try {
+      return await this.prisma.class.update({
+        where: { id },
+        data: {
+          name: data.name,
+          code: data.code,
+          subject: data.subject,
+          tuition: data.tuition?.toString(),
+          description: data.description,
+          status: data.status,
+          format: data.format,
+          startTime: toDate(data.startTime),
+          endTime: toDate(data.endTime),
+          location: data.location,
+          curriculumId: data.curriculumId,
+        },
+      });
+    } catch (error) {
+      if (isRecordNotFound(error)) return null;
+      throw error;
+    }
   }
 
   // reconcile a class's enrolled students to exactly `studentIds`: remove students no longer
   // in the list, insert the ones newly added (duplicates skipped via the unique index).
   async syncStudents({ classId, studentIds }: { classId: string; studentIds: string[] }) {
-    if (studentIds.length > 0) {
-      await this.db
-        .delete(classStudents)
-        .where(
-          and(eq(classStudents.classId, classId), notInArray(classStudents.studentId, studentIds)),
-        );
-      await this.db
-        .insert(classStudents)
-        .values(studentIds.map((studentId) => ({ classId, studentId })))
-        .onConflictDoNothing();
-    } else {
-      await this.db.delete(classStudents).where(eq(classStudents.classId, classId));
-    }
+    await this.prisma.$transaction([
+      this.prisma.classStudent.deleteMany({
+        where: { classId, studentId: { notIn: studentIds } },
+      }),
+      this.prisma.classStudent.createMany({
+        data: studentIds.map((studentId) => ({ classId, studentId })),
+        skipDuplicates: true,
+      }),
+    ]);
   }
 
   async getClasses({
@@ -113,94 +107,61 @@ export class ClassRepository {
 
     const searchWhere = buildListWhereClause({
       search,
-      searchableColumns: {
-        name: { column: classes.name },
-        code: { column: classes.code },
-        subject: { column: classes.subject },
-      },
+      searchFields: ['name', 'code', 'subject'],
       filters: { status, subject },
-      filterColumns: {
-        status: { column: classes.status },
-        subject: { column: classes.subject },
-      },
     });
 
-    let scopeWhere: SQL | undefined;
+    let scopeWhere: Prisma.ClassWhereInput;
     if (role === 'STUDENT') {
-      const enrolledClassIds = this.db
-        .select({ classId: classStudents.classId })
-        .from(classStudents)
-        .where(eq(classStudents.studentId, userId));
-      scopeWhere = inArray(classes.id, enrolledClassIds);
+      scopeWhere = { students: { some: { studentId: userId } } };
     } else if (role === 'PARENT') {
-      const childClassIds = this.db
-        .select({ classId: classStudents.classId })
-        .from(classStudents)
-        .innerJoin(users, eq(users.id, classStudents.studentId))
-        .where(eq(users.parentId, userId));
-      scopeWhere = inArray(classes.id, childClassIds);
+      scopeWhere = { students: { some: { student: { parentId: userId } } } };
     } else {
-      scopeWhere = eq(classes.tutorId, userId);
+      scopeWhere = { tutorId: userId };
     }
 
-    const conditions = [searchWhere, scopeWhere];
-    if (studentsId) {
-      const studentClassIds = this.db
-        .select({ classId: classStudents.classId })
-        .from(classStudents)
-        .where(eq(classStudents.studentId, studentsId));
-      conditions.push(inArray(classes.id, studentClassIds));
-    }
-    const whereClause = and(...conditions.filter((c) => c !== undefined));
+    const conditions: Prisma.ClassWhereInput[] = [scopeWhere];
+    if (searchWhere) conditions.push(searchWhere);
+    if (studentsId) conditions.push({ students: { some: { studentId: studentsId } } });
+    const where: Prisma.ClassWhereInput = { AND: conditions };
 
-    const [totalRow] = await this.db.select({ total: count() }).from(classes).where(whereClause);
-    const total = Number(totalRow?.total ?? 0);
     const pageNumber = Number(page);
     const limitNumber = Number(limit);
-    const offset = (pageNumber - 1) * limitNumber;
 
-    const classesRow = await this.db
-      .select()
-      .from(classes)
-      .where(whereClause)
-      .limit(limitNumber)
-      .offset(offset);
+    const [total, classesRow] = await Promise.all([
+      this.prisma.class.count({ where }),
+      this.prisma.class.findMany({
+        where,
+        take: limitNumber,
+        skip: (pageNumber - 1) * limitNumber,
+      }),
+    ]);
 
     const classIds = classesRow.map((c) => c.id);
     const [studentsRows, schedulesRows] =
       classIds.length > 0
         ? await Promise.all([
-            this.db
-              .select({
-                classId: classStudents.classId,
-                id: users.id,
-                firstName: users.firstName,
-                lastName: users.lastName,
-                email: users.email,
-                phone: users.phone,
-                avatar: users.avatar,
-                userCode: users.userCode,
-                gender: users.gender,
-                school: users.school,
-                enrolledAt: classStudents.createdAt,
-              })
-              .from(classStudents)
-              .innerJoin(users, eq(users.id, classStudents.studentId))
-              .where(inArray(classStudents.classId, classIds))
-              .orderBy(classStudents.createdAt),
-            this.db
-              .select()
-              .from(schedules)
-              .where(inArray(schedules.classId, classIds))
-              .orderBy(asc(schedules.dayOfWeek)),
+            this.prisma.classStudent.findMany({
+              where: { classId: { in: classIds } },
+              select: {
+                classId: true,
+                createdAt: true,
+                student: { select: ENROLLED_STUDENT_SELECT },
+              },
+              orderBy: { createdAt: 'asc' },
+            }),
+            this.prisma.schedule.findMany({
+              where: { classId: { in: classIds } },
+              orderBy: { dayOfWeek: 'asc' },
+            }),
           ])
         : [[], []];
 
-    const studentsByClass = new Map<string, (typeof studentsRows)[number][]>();
-    for (const student of studentsRows) {
-      const list = studentsByClass.get(student.classId) ?? [];
-      list.push(student);
-      studentsByClass.set(student.classId, list);
+    const studentsByClass = new Map<string, ReturnType<typeof flattenEnrollment>[]>();
+    for (const row of studentsRows) {
+      const list = studentsByClass.get(row.classId) ?? [];
+      list.push(flattenEnrollment(row));
+      studentsByClass.set(row.classId, list);
     }
 
     const schedulesByClass = new Map<string, (typeof schedulesRows)[number][]>();
@@ -216,12 +177,7 @@ export class ClassRepository {
         students: studentsByClass.get(classData.id) ?? [],
         schedules: schedulesByClass.get(classData.id) ?? [],
       })),
-      pagination: {
-        total,
-        page: pageNumber,
-        limit: limitNumber,
-        totalPages: Math.ceil(total / limitNumber),
-      },
+      pagination: buildPagination(total, pageNumber, limitNumber),
     };
   }
 
@@ -229,102 +185,82 @@ export class ClassRepository {
   // via the (class_id, student_id) unique index and simply not returned.
   async addStudents({ classId, studentIds }: { classId: string; studentIds: string[] }) {
     if (studentIds.length === 0) return [];
-    const rows = await this.db
-      .insert(classStudents)
-      .values(studentIds.map((studentId) => ({ classId, studentId })))
-      .onConflictDoNothing()
-      .returning();
-    return rows;
+    return this.prisma.classStudent.createManyAndReturn({
+      data: studentIds.map((studentId) => ({ classId, studentId })),
+      skipDuplicates: true,
+    });
   }
 
   //todo : get detail class by id (with enrolled students) ...
   async getClass({ id }: { id: string }) {
-    const [classData] = await this.db.select().from(classes).where(eq(classes.id, id)).limit(1);
+    const classData = await this.prisma.class.findUnique({ where: { id } });
     if (!classData) return null;
 
-    const students = await this.db
-      .select({
-        id: users.id,
-        firstName: users.firstName,
-        lastName: users.lastName,
-        email: users.email,
-        phone: users.phone,
-        avatar: users.avatar,
-        userCode: users.userCode,
-        gender: users.gender,
-        school: users.school,
-        enrolledAt: classStudents.createdAt,
-      })
-      .from(classStudents)
-      .innerJoin(users, eq(users.id, classStudents.studentId))
-      .where(eq(classStudents.classId, id))
-      .orderBy(classStudents.createdAt);
+    const enrollments = await this.prisma.classStudent.findMany({
+      where: { classId: id },
+      select: { createdAt: true, student: { select: ENROLLED_STUDENT_SELECT } },
+      orderBy: { createdAt: 'asc' },
+    });
 
-    return { ...classData, students };
+    return { ...classData, students: enrollments.map(flattenEnrollment) };
   }
 
   /** True when any tuition record (any status) still references the class. */
   async hasTuitionHistory({ classId }: { classId: string }) {
-    const [row] = await this.db
-      .select({ id: tuitions.id })
-      .from(tuitions)
-      .where(eq(tuitions.classId, classId))
-      .limit(1);
+    const row = await this.prisma.tuition.findFirst({ where: { classId }, select: { id: true } });
     return !!row;
   }
 
   async delClass({ id }: { id: string }) {
-    const [classData] = await this.db.delete(classes).where(eq(classes.id, id)).returning();
-    return !!classData;
+    const { count } = await this.prisma.class.deleteMany({ where: { id } });
+    return count > 0;
   }
 
   // list every lesson of a curriculum, joined with its chapter title, ordered for display.
   // Each lesson carries its theoryUrls / exerciseUrls — the service derives the two material lists.
   async getMaterials({ curriculumId }: { curriculumId: string }) {
-    return await this.db
-      .select({
-        id: lessons.id,
-        title: lessons.title,
-        description: lessons.description,
-        order: lessons.order,
-        chapterId: lessons.chapterId,
-        chapterTitle: chapters.title,
-        theoryUrls: lessons.theoryUrls,
-        exerciseUrls: lessons.exerciseUrls,
-        createdAt: lessons.createdAt,
-      })
-      .from(lessons)
-      .leftJoin(chapters, eq(chapters.id, lessons.chapterId))
-      .where(eq(lessons.curriculumId, curriculumId))
-      .orderBy(asc(lessons.order), asc(lessons.createdAt));
+    const lessons = await this.prisma.lesson.findMany({
+      where: { curriculumId },
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        order: true,
+        chapterId: true,
+        chapter: { select: { title: true } },
+        theoryUrls: true,
+        exerciseUrls: true,
+        createdAt: true,
+      },
+      orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
+    });
+    return lessons.map(({ chapter, theoryUrls, exerciseUrls, ...lesson }) => ({
+      ...lesson,
+      theoryUrls: theoryUrls as Prisma.JsonArray | null,
+      exerciseUrls: exerciseUrls as Prisma.JsonArray | null,
+      chapterTitle: chapter?.title ?? null,
+    }));
   }
 
   async isEnrolled({ userId, classId }: { userId: string; classId: string }) {
-    const [row] = await this.db
-      .select({ id: classStudents.id })
-      .from(classStudents)
-      .where(and(eq(classStudents.classId, classId), eq(classStudents.studentId, userId)))
-      .limit(1);
+    const row = await this.prisma.classStudent.findFirst({
+      where: { classId, studentId: userId },
+      select: { id: true },
+    });
     return !!row;
   }
 
   // a parent can reach a class when one of their children (users.parentId = userId) is enrolled
   async isParentOfEnrolled({ userId, classId }: { userId: string; classId: string }) {
-    const [row] = await this.db
-      .select({ id: classStudents.id })
-      .from(classStudents)
-      .innerJoin(users, eq(users.id, classStudents.studentId))
-      .where(and(eq(classStudents.classId, classId), eq(users.parentId, userId)))
-      .limit(1);
+    const row = await this.prisma.classStudent.findFirst({
+      where: { classId, student: { parentId: userId } },
+      select: { id: true },
+    });
     return !!row;
   }
 
   async getSchedulesByClass({ classId }: { classId: string }) {
-    return this.db
-      .select()
-      .from(schedules)
-      .where(eq(schedules.classId, classId))
-      .orderBy(asc(schedules.dayOfWeek));
+    return this.prisma.schedule.findMany({ where: { classId }, orderBy: { dayOfWeek: 'asc' } });
   }
 
   // the session to surface on the "watch" overview: the one currently ongoing, else the
@@ -332,62 +268,53 @@ export class ClassRepository {
   async getRecentSessionByClass({ classId }: { classId: string }) {
     const now = new Date();
 
-    const [ongoing] = await this.db
-      .select()
-      .from(sessions)
-      .where(and(eq(sessions.classId, classId), eq(sessions.status, 'ONGOING')))
-      .orderBy(asc(sessions.startAt))
-      .limit(1);
+    const ongoing = await this.prisma.classSession.findFirst({
+      where: { classId, status: 'ONGOING' },
+      orderBy: { startAt: 'asc' },
+    });
     if (ongoing) return ongoing;
 
-    const [upcoming] = await this.db
-      .select()
-      .from(sessions)
-      .where(
-        and(
-          eq(sessions.classId, classId),
-          gte(sessions.startAt, now),
-          inArray(sessions.status, ['SCHEDULED', 'POSTPONED']),
-        ),
-      )
-      .orderBy(asc(sessions.startAt))
-      .limit(1);
+    const upcoming = await this.prisma.classSession.findFirst({
+      where: { classId, startAt: { gte: now }, status: { in: ['SCHEDULED', 'POSTPONED'] } },
+      orderBy: { startAt: 'asc' },
+    });
     if (upcoming) return upcoming;
 
-    const [past] = await this.db
-      .select()
-      .from(sessions)
-      .where(and(eq(sessions.classId, classId), lt(sessions.startAt, now)))
-      .orderBy(desc(sessions.startAt))
-      .limit(1);
-    return past ?? null;
+    return this.prisma.classSession.findFirst({
+      where: { classId, startAt: { lt: now } },
+      orderBy: { startAt: 'desc' },
+    });
   }
 
   async getAllStudent({ id }: { id: string }) {
-    const parents = alias(users, 'parents');
-    return await this.db
-      .select({
-        id: users.id,
-        firstName: users.firstName,
-        lastName: users.lastName,
-        email: users.email,
-        avatar: users.avatar,
-        phone: users.phone,
-        role: users.role,
-        userCode: users.userCode,
-        parent: {
-          id: parents.id,
-          firstName: parents.firstName,
-          lastName: parents.lastName,
-          email: parents.email,
-          avatar: parents.avatar,
-          phone: parents.phone,
-          relationship: parents.relationship,
+    const rows = await this.prisma.classStudent.findMany({
+      where: { classId: id },
+      select: {
+        student: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            avatar: true,
+            phone: true,
+            role: true,
+            userCode: true,
+            parent: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                email: true,
+                avatar: true,
+                phone: true,
+                relationship: true,
+              },
+            },
+          },
         },
-      })
-      .from(classStudents)
-      .innerJoin(users, eq(users.id, classStudents.studentId))
-      .leftJoin(parents, eq(parents.id, users.parentId))
-      .where(eq(classStudents.classId, id));
+      },
+    });
+    return rows.map((row) => row.student);
   }
 }

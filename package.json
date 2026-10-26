@@ -14,6 +14,13 @@
     "start:debug": "nest start --debug --watch",
     "start:prod": "node -r tsconfig-paths/register dist/main",
     "typecheck": "tsc --noEmit",
+    "postinstall": "prisma generate",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate deploy",
+    "db:migrate:dev": "prisma migrate dev",
+    "db:baseline": "prisma migrate resolve --applied 0_init",
+    "db:push": "prisma db push",
+    "db:studio": "prisma studio",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "lint:check": "eslint \"{src,apps,libs,test}/**/*.ts\"",
     "test": "jest",
@@ -52,6 +59,7 @@
     "@nestjs/platform-socket.io": "11",
     "@nestjs/swagger": "^11.4.2",
     "@nestjs/websockets": "11",
+    "@prisma/client": "6.19.3",
     "@types/bcrypt": "^6.0.0",
     "amqp-connection-manager": "^5.0.0",
     "amqplib": "^0.10.9",
@@ -59,7 +67,6 @@
     "bcryptjs": "^3.0.3",
     "cloudinary": "^2.10.0",
     "dotenv": "^17.4.2",
-    "drizzle-orm": "^0.45.2",
     "http-status-codes": "^2.3.0",
     "ioredis": "^5.8.2",
     "nodemailer": "^7.0.11",
@@ -67,7 +74,6 @@
     "passport-google-oauth20": "^2.0.0",
     "passport-jwt": "^4.0.1",
     "pg": "^8.20.0",
-    "postgres": "^3.4.9",
     "redis": "^6.1.0",
     "reflect-metadata": "^0.2.2",
     "resend": "^6.17.2",
@@ -102,6 +108,7 @@
     "globals": "^17.0.0",
     "jest": "29.7.0",
     "prettier": "^3.4.2",
+    "prisma": "6.19.3",
     "source-map-support": "^0.5.21",
     "supertest": "^7.0.0",
     "ts-jest": "^29.4.11",
@@ -111,6 +118,9 @@
     "typescript-eslint": "^8.20.0"
   },
   "trustedDependencies": [
-    "@swc/core"
+    "@swc/core",
+    "prisma",
+    "@prisma/client",
+    "@prisma/engines"
   ]
 }

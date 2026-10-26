@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ReportService } from 'src/features/report/report.service';
 import { ReportRepository } from 'src/features/report/report.repository';
 
-// report.repository pulls drizzle + an ESM-only transitive dep (uuid) that jest cannot parse;
+// report.repository pulls an ESM-only transitive dep (uuid) that jest cannot parse;
 // the service only needs the repository token, so swap the module for a bare class
 jest.mock('src/features/report/report.repository', () => ({
   ReportRepository: class ReportRepository {},

@@ -1,9 +1,7 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { ERROR_MESSAGES } from 'src/data/constants';
 import { LessonRepository } from './lesson.repository';
 import { CurriculumRepository } from '../curriculum/curriculum.repository';
-import { DRIZZLE } from 'src/database/database.module';
-import { drizzle } from 'drizzle-orm/postgres-js';
 import {
   type CreateLessonBodyDto,
   type UpdateLessonDto,
@@ -16,7 +14,6 @@ export class LessonService {
   constructor(
     private readonly lessonRepository: LessonRepository,
     private readonly curriculumRepository: CurriculumRepository,
-    @Inject(DRIZZLE) private readonly db: ReturnType<typeof drizzle>,
   ) {}
 
   /** Writes are limited to the curriculum's owner; anyone else gets a 404. */

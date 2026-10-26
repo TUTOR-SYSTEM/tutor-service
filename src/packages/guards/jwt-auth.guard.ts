@@ -3,15 +3,11 @@ import { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { IS_PUBLIC_KEY } from '@packages/decorators';
-import { DRIZZLE } from 'src/database/database.module';
+import { PrismaService } from 'src/database/prisma.service';
 import type { Request } from 'express';
-import { Inject } from '@nestjs/common';
-import { type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import { eq } from 'drizzle-orm';
 
 import type { JwtUserRole } from '@packages/helpers';
 import { resolveJwtAccessSecret } from '../configs/jwt-sign.config';
-import { users } from 'src/database/schema';
 
 /** Access-token payload shape (matches access JWTs from `signAccessToken`). */
 export type JwtGuardUser = {
@@ -57,16 +53,12 @@ function parseAccessPayload(decoded: unknown): JwtGuardUser {
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
-  private readonly db: PostgresJsDatabase<Record<string, never>>;
-
   constructor(
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly reflector: Reflector,
-    @Inject(DRIZZLE) private readonly drizzleDB: PostgresJsDatabase<Record<string, never>>,
-  ) {
-    this.db = drizzleDB;
-  }
+    private readonly prisma: PrismaService,
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
@@ -98,9 +90,12 @@ export class JwtAuthGuard implements CanActivate {
     const payload = parseAccessPayload(decoded);
     request.user = payload;
 
-    const user = await this.db.select().from(users).where(eq(users.id, payload.id)).limit(1);
+    const user = await this.prisma.user.findUnique({
+      where: { id: payload.id },
+      select: { id: true },
+    });
 
-    if (user.length === 0) {
+    if (!user) {
       throw new UnauthorizedException('Unauthorized ...');
     }
 

@@ -1,0 +1,642 @@
+// Prisma schema for the shared Postgres DB. Mirrors the former Drizzle schema
+// (gateway `src/database/schema.ts`) 1:1: same table/column/enum names via @map/@@map.
+// Runtime connection: PrismaService passes `datasourceUrl` (DATABASE_URL or POSTGRES_*); the
+// `env("DATABASE_URL")` below is what the Prisma CLI (migrate/studio) reads.
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ──────────────────────────────────────────────────────────
+enum UserRole {
+  STUDENT
+  ADMIN
+  TUTOR
+  PARENT
+
+  @@map("user_role")
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+
+  @@map("gender")
+}
+
+enum ClassStatus {
+  OPEN
+  CLOSED
+  UPCOMING
+
+  @@map("class_status")
+}
+
+enum SessionFormat {
+  ONLINE
+  OFFLINE
+
+  @@map("session_format")
+}
+
+enum SessionStatus {
+  UPCOMING
+  COMPLETED
+  CANCELLED
+
+  @@map("session_status")
+}
+
+enum ClassSessionStatus {
+  SCHEDULED
+  ONGOING
+  COMPLETED
+  CANCELLED
+  POSTPONED
+
+  @@map("class_session_status")
+}
+
+enum DayOfWeek {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+
+  @@map("day_of_week")
+}
+
+enum CurriculumStatus {
+  COMPLETED
+  UPCOMING
+
+  @@map("curriculum_status")
+}
+
+enum AssignmentStatus {
+  COMPLETED
+  OVERDUE
+  IN_PROGRESS
+
+  @@map("assignment_status")
+}
+
+enum ExerciseStatus {
+  SUBMITTED
+  GRADED
+  RESUBMIT
+
+  @@map("exercise_status")
+}
+
+enum TuitionStatus {
+  PAID
+  UNPAID
+  OVERDUE
+
+  @@map("tuition_status")
+}
+
+enum AiMessageRole {
+  USER
+  ASSISTANT
+
+  @@map("ai_message_role")
+}
+
+enum ConversationType {
+  DIRECT
+  GROUP
+  CLASS
+
+  @@map("conversation_type")
+}
+
+enum MessageStatus {
+  SENT
+  DELIVERED
+  READ
+
+  @@map("message_status")
+}
+
+enum NotificationType {
+  SYSTEM
+  TUITION
+  STUDENT
+  TUTOR
+
+  @@map("notification_type")
+}
+
+enum NotificationAction {
+  VIEW
+  CONTACT
+  PAYMENT
+  UPDATE
+
+  @@map("notification_action")
+}
+
+enum LogType {
+  HTTP
+  RPC
+
+  @@map("log_type")
+}
+
+enum TestScenarioCategory {
+  valid
+  auth
+  validation
+  not_found
+  domain
+
+  @@map("test_scenario_category")
+}
+
+enum TestAuthProfile {
+  caller
+  admin
+  tutor
+  student
+  parent
+  none
+
+  @@map("test_auth_profile")
+}
+
+// ─── USER: users, grades ────────────────────────────────────────────
+model User {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email         String    @unique @db.VarChar(255)
+  username      String    @unique @db.VarChar(50)
+  firstName     String    @map("first_name") @db.VarChar(255)
+  lastName      String    @map("last_name") @db.VarChar(255)
+  password      String
+  avatar        String?
+  phone         String?   @db.VarChar(20)
+  isActive      Boolean?  @default(true) @map("is_active")
+  emailVerified Boolean   @default(false) @map("email_verified")
+  role          UserRole? @default(STUDENT)
+  description   String?   @db.VarChar(5000)
+  userCode      String?   @map("userCode") @db.VarChar(6)
+  gender        Gender?
+  dateOfBirth   DateTime? @map("date_of_birth") @db.Timestamp(6)
+  address       String?
+  district      String?   @db.VarChar(30)
+  province      String?   @db.VarChar(30)
+  subjects      String?   @db.VarChar(255)
+  facebookId    String?   @map("facebookUrl") @db.VarChar(200)
+  googleId      String?   @map("googleUrl") @db.VarChar(200)
+  school        String?   @db.VarChar(255)
+  relationship  String?   @db.VarChar(50)
+  gradesId      String[]  @default([]) @map("grades_id") @db.Uuid
+  parentId      String?   @map("parent_id") @db.Uuid
+  tutorId       String?   @map("tutor_id") @db.Uuid
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  parent   User?  @relation("UserParent", fields: [parentId], references: [id], onDelete: Cascade)
+  children User[] @relation("UserParent")
+  tutor    User?  @relation("UserTutor", fields: [tutorId], references: [id], onDelete: Cascade)
+  tutees   User[] @relation("UserTutor")
+
+  classesTaught             Class[]
+  classEnrollments          ClassStudent[]
+  sessionsTaught            ClassSession[]
+  curriculums               Curriculum[]
+  tuitions                  Tuition[]
+  studentScores             StudentScore[]
+  aiMessages                AiMessage[]
+  attendances               Attendance[]
+  exercisesAsTutor          Exercise[]                @relation("ExerciseTutor")
+  exercisesAsStudent        Exercise[]                @relation("ExerciseStudent")
+  conversationsCreated      Conversation[]
+  conversationParticipation ConversationParticipant[]
+  messagesSent              Message[]
+  notificationsReceived     Notification[]            @relation("NotificationUser")
+  notificationsSent         Notification[]            @relation("NotificationSender")
+  notificationsAbout        Notification[]            @relation("NotificationStudent")
+
+  @@map("users")
+}
+
+model Grade {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String   @unique @db.VarChar(50)
+  level     Int      @unique
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  curriculums Curriculum[]
+
+  @@map("grades")
+}
+
+// ─── tutor-service: education domain ────────────────────────────────
+model Class {
+  id           String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name         String        @db.VarChar(255)
+  code         String        @unique @db.VarChar(50)
+  subject      String        @db.VarChar(255)
+  tuition      Decimal?      @default(0) @db.Decimal(14, 2)
+  description  String?
+  status       ClassStatus?  @default(OPEN)
+  format       SessionFormat @default(ONLINE)
+  startTime    DateTime      @default(now()) @map("start_time") @db.Timestamp(6)
+  endTime      DateTime      @default(now()) @map("end_time") @db.Timestamp(6)
+  location     String?
+  curriculumId String?       @map("curriculum_id") @db.Uuid
+  tutorId      String        @map("tutor_id") @db.Uuid
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt    DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  curriculum Curriculum? @relation(fields: [curriculumId], references: [id], onDelete: SetNull)
+  tutor      User        @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+
+  students      ClassStudent[]
+  schedules     Schedule[]
+  sessions      ClassSession[]
+  tuitions      Tuition[]
+  studentScores StudentScore[]
+  conversations Conversation[]
+  notifications Notification[]
+
+  @@map("classes")
+}
+
+model ClassStudent {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  classId   String   @map("class_id") @db.Uuid
+  studentId String   @map("student_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+
+  class   Class @relation(fields: [classId], references: [id], onDelete: Cascade)
+  student User  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([classId, studentId], map: "class_students_unique")
+  @@map("class_students")
+}
+
+model Schedule {
+  id        String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  classId   String        @map("class_id") @db.Uuid
+  dayOfWeek DayOfWeek     @map("day_of_week")
+  startTime String        @map("start_time") @db.VarChar(5)
+  endTime   String        @map("end_time") @db.VarChar(5)
+  format    SessionFormat @default(ONLINE)
+  location  String?
+  createdAt DateTime      @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  class Class @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  @@map("schedules")
+}
+
+model ClassSession {
+  id            String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  classId       String             @map("class_id") @db.Uuid
+  lessonId      String?            @map("lesson_id") @db.Uuid
+  tutorId       String?            @map("tutor_id") @db.Uuid
+  title         String?            @db.VarChar(255)
+  description   String?
+  sessionNumber Int                @map("session_number")
+  // Legacy duplicate of lesson_id (typo kept to match the existing column).
+  lessionId     String?            @map("lession_id") @db.Uuid
+  theoryUrls    Json?              @default("[]") @map("theory_urls")
+  exerciseUrls  Json?              @default("[]") @map("exercise_urls")
+  startAt       DateTime           @map("start_at") @db.Timestamptz(6)
+  endAt         DateTime           @map("end_at") @db.Timestamptz(6)
+  location      String?
+  status        ClassSessionStatus @default(SCHEDULED)
+  note          String?
+  actualStartAt DateTime?          @map("actual_start_at") @db.Timestamptz(6)
+  actualEndAt   DateTime?          @map("actual_end_at") @db.Timestamptz(6)
+  objectives    Json?              @default("[]")
+  agenda        Json?              @default("[]")
+  exerciseDueAt DateTime?          @map("exercise_due_at") @db.Timestamptz(6)
+  createdAt     DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  class        Class   @relation(fields: [classId], references: [id], onDelete: Cascade)
+  lesson       Lesson? @relation("SessionLesson", fields: [lessonId], references: [id], onDelete: SetNull)
+  legacyLesson Lesson? @relation("SessionLegacyLesson", fields: [lessionId], references: [id], onDelete: SetNull)
+  tutor        User?   @relation(fields: [tutorId], references: [id], onDelete: SetNull)
+
+  attendances Attendance[]
+  exercises   Exercise[]
+
+  @@map("class_sessions")
+}
+
+model Curriculum {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String   @map("userId") @db.Uuid
+  gradesId    String?  @map("grade_id") @db.Uuid
+  subject     String   @map("title") @db.VarChar(255)
+  code        String   @db.VarChar(6)
+  grade       String   @db.VarChar(2)
+  courseTime  String   @map("courseTime") @db.VarChar
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  gradeRef Grade? @relation(fields: [gradesId], references: [id], onDelete: Cascade)
+
+  classes  Class[]
+  chapters Chapter[]
+  lessons  Lesson[]
+
+  @@map("curriculums")
+}
+
+model Chapter {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  curriculumId String   @map("curriculum_id") @db.Uuid
+  title        String   @db.VarChar(255)
+  description  String?
+  order        Int?     @default(0)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  curriculum Curriculum @relation(fields: [curriculumId], references: [id], onDelete: Cascade)
+  lessons    Lesson[]
+
+  @@map("chapters")
+}
+
+model Lesson {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  curriculumId String   @map("curriculum_id") @db.Uuid
+  chapterId    String?  @map("chapter_id") @db.Uuid
+  title        String   @db.VarChar(255)
+  description  String?
+  theoryUrls   Json?    @default("[]") @map("theory_urls")
+  exerciseUrls Json?    @default("[]") @map("exercise_urls")
+  order        Int?     @default(0)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  curriculum     Curriculum     @relation(fields: [curriculumId], references: [id], onDelete: Cascade)
+  chapter        Chapter?       @relation(fields: [chapterId], references: [id], onDelete: SetNull)
+  sessions       ClassSession[] @relation("SessionLesson")
+  legacySessions ClassSession[] @relation("SessionLegacyLesson")
+  exercises      Exercise[]
+
+  @@map("lessons")
+}
+
+model Tuition {
+  id        String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  classId   String         @map("class_id") @db.Uuid
+  studentId String         @map("student_id") @db.Uuid
+  amount    Decimal        @db.Decimal(14, 2)
+  dueDate   DateTime?      @map("due_date") @db.Timestamp(6)
+  paidDate  DateTime?      @map("paid_date") @db.Timestamp(6)
+  status    TuitionStatus? @default(UNPAID)
+  note      String?
+  createdAt DateTime       @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  class   Class @relation(fields: [classId], references: [id], onDelete: Cascade)
+  student User  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@map("tuitions")
+}
+
+model StudentScore {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  studentId String   @map("student_id") @db.Uuid
+  classId   String   @map("class_id") @db.Uuid
+  score     Decimal? @db.Decimal(5, 2)
+  comment   String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  student User  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  class   Class @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  @@map("student_scores")
+}
+
+model AiMessage {
+  id        String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String        @map("user_id") @db.Uuid
+  role      AiMessageRole
+  content   String
+  createdAt DateTime      @default(now()) @map("created_at") @db.Timestamp(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt], map: "ai_messages_user_id_created_at_idx")
+  @@map("ai_messages")
+}
+
+model Attendance {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sessionId String   @map("session_id") @db.Uuid
+  studentId String   @map("student_id") @db.Uuid
+  present   Boolean  @default(false)
+  note      String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  session ClassSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  student User         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, studentId], map: "attendances_session_student_unique")
+  @@map("attendances")
+}
+
+model Exercise {
+  id           String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  lessonId     String?        @map("lesson_id") @db.Uuid
+  sessionId    String?        @map("session_id") @db.Uuid
+  tutorId      String         @map("tutor_id") @db.Uuid
+  studentId    String         @map("student_id") @db.Uuid
+  issueUrls    Json?          @default("[]") @map("issue_urls")
+  exerciseUrls Json?          @default("[]") @map("exercise_urls")
+  status       ExerciseStatus @default(SUBMITTED)
+  score        Decimal?       @db.Decimal(5, 2)
+  comment      String?
+  gradedAt     DateTime?      @map("graded_at") @db.Timestamp(6)
+  createdAt    DateTime       @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt    DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  lesson  Lesson?       @relation(fields: [lessonId], references: [id], onDelete: SetNull)
+  session ClassSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  tutor   User          @relation("ExerciseTutor", fields: [tutorId], references: [id], onDelete: Cascade)
+  student User          @relation("ExerciseStudent", fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@map("exercises")
+}
+
+model Conversation {
+  id            String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  type          ConversationType @default(DIRECT)
+  name          String?          @db.VarChar(255)
+  classId       String?          @map("class_id") @db.Uuid
+  createdBy     String           @map("created_by") @db.Uuid
+  lastMessageAt DateTime?        @map("last_message_at") @db.Timestamp(6)
+  createdAt     DateTime         @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt     DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  class   Class? @relation(fields: [classId], references: [id], onDelete: SetNull)
+  creator User   @relation(fields: [createdBy], references: [id], onDelete: Cascade)
+
+  participants ConversationParticipant[]
+  messages     Message[]
+
+  @@map("conversations")
+}
+
+model ConversationParticipant {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversationId String    @map("conversation_id") @db.Uuid
+  userId         String    @map("user_id") @db.Uuid
+  lastReadAt     DateTime? @map("last_read_at") @db.Timestamp(6)
+  joinedAt       DateTime  @default(now()) @map("joined_at") @db.Timestamp(6)
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId], map: "conversation_participants_unique")
+  @@map("conversation_participants")
+}
+
+model Message {
+  id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversationId String        @map("conversation_id") @db.Uuid
+  senderId       String        @map("sender_id") @db.Uuid
+  content        String
+  status         MessageStatus @default(SENT)
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamp(6)
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt], map: "messages_conversation_id_created_at_idx")
+  @@map("messages")
+}
+
+// ─── THIRD_SERVICE: notifications, request_logs, test tooling ───────
+model Notification {
+  id          String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String?             @map("user_id") @db.Uuid
+  senderId    String?             @map("sender_id") @db.Uuid
+  classId     String?             @map("class_id") @db.Uuid
+  studentId   String?             @map("student_id") @db.Uuid
+  type        NotificationType
+  title       String              @db.VarChar(255)
+  content     String
+  subContent  String?             @map("sub_content") @db.VarChar(255)
+  redirectUrl String?             @map("redirect_url") @db.VarChar(500)
+  actionLabel String?             @default("Xem chi tiết") @map("action_label") @db.VarChar(100)
+  actionType  NotificationAction? @map("action_type")
+  isRead      Boolean             @default(false) @map("is_read")
+  readAt      DateTime?           @map("read_at") @db.Timestamp(6)
+  metadata    Json?
+  createdAt   DateTime            @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt   DateTime?           @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  user    User?  @relation("NotificationUser", fields: [userId], references: [id], onDelete: Cascade)
+  sender  User?  @relation("NotificationSender", fields: [senderId], references: [id], onDelete: SetNull)
+  class   Class? @relation(fields: [classId], references: [id], onDelete: Cascade)
+  student User?  @relation("NotificationStudent", fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+model RequestLog {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  serviceName     String   @map("service_name") @db.VarChar(50)
+  type            LogType
+  method          String?  @db.VarChar(10)
+  path            String
+  statusCode      Int?     @map("status_code")
+  durationMs      Int      @map("duration_ms")
+  correlationId   String   @map("correlation_id") @db.VarChar(100)
+  traceId         String   @map("trace_id") @db.VarChar(100)
+  parentTraceId   String?  @map("parent_trace_id") @db.VarChar(100)
+  userId          String?  @map("user_id") @db.Uuid
+  ip              String?  @db.VarChar(64)
+  requestBody     String?  @map("request_body")
+  responseBody    String?  @map("response_body")
+  requestHeaders  String?  @map("request_headers")
+  responseHeaders String?  @map("response_headers")
+  host            String?  @db.VarChar(100)
+  errorMessage    String?  @map("error_message")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+
+  @@index([correlationId], map: "request_logs_correlation_id_idx")
+  @@index([serviceName, createdAt], map: "request_logs_service_name_created_at_idx")
+  @@map("request_logs")
+}
+
+model TestScenario {
+  id              String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  service         String               @db.VarChar(50)
+  method          String               @db.VarChar(10)
+  path            String
+  name            String               @db.VarChar(200)
+  description     String?
+  requestTemplate Json                 @default("{}") @map("request_template")
+  expectedStatus  Int                  @map("expected_status")
+  expectedMessage String?              @map("expected_message")
+  category        TestScenarioCategory @default(valid)
+  authProfile     TestAuthProfile      @default(caller) @map("auth_profile")
+  createdAt       DateTime             @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt       DateTime?            @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  runs TestRun[]
+
+  @@index([method, path], map: "test_scenarios_method_path_idx")
+  @@map("test_scenarios")
+}
+
+model TestRun {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  scenarioId     String   @map("scenario_id") @db.Uuid
+  correlationId  String   @map("correlation_id") @db.VarChar(100)
+  actualStatus   Int?     @map("actual_status")
+  expectedStatus Int      @map("expected_status")
+  passed         Boolean
+  durationMs     Int      @map("duration_ms")
+  errorMessage   String?  @map("error_message")
+  responseBody   String?  @map("response_body")
+  requestPath    String?  @map("request_path")
+  triggeredBy    String?  @map("triggered_by") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+
+  scenario TestScenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+
+  @@index([scenarioId, createdAt], map: "test_runs_scenario_id_created_at_idx")
+  @@index([correlationId], map: "test_runs_correlation_id_idx")
+  @@map("test_runs")
+}
+
+model TestFixture {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  key         String    @unique @db.VarChar(100)
+  description String?
+  value       String?
+  resolver    Json?
+  resolvedAt  DateTime? @map("resolved_at") @db.Timestamp(6)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt   DateTime? @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  @@map("test_fixtures")
+}

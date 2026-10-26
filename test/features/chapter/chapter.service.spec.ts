@@ -4,9 +4,8 @@ import { ERROR_MESSAGES } from 'src/data/constants';
 import { ChapterService } from 'src/features/chapter/chapter.service';
 import { ChapterRepository } from 'src/features/chapter/chapter.repository';
 import { CurriculumRepository } from 'src/features/curriculum/curriculum.repository';
-import { DRIZZLE } from 'src/database/database.module';
 
-// the chapter repository pulls drizzle + an ESM-only transitive dep (uuid) that jest cannot parse;
+// the chapter repository pulls an ESM-only transitive dep (uuid) that jest cannot parse;
 // the service only needs the repository token, so swap the module for a bare class
 jest.mock('src/features/chapter/chapter.repository', () => ({
   ChapterRepository: class ChapterRepository {},
@@ -44,7 +43,6 @@ describe('ChapterService', () => {
         ChapterService,
         { provide: ChapterRepository, useValue: repo },
         { provide: CurriculumRepository, useValue: curriculumRepo },
-        { provide: DRIZZLE, useValue: {} },
       ],
     }).compile();
 

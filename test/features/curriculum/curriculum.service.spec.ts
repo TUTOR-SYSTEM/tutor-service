@@ -10,7 +10,7 @@ import { CurriculumService } from 'src/features/curriculum/curriculum.service';
 import { CurriculumRepository } from 'src/features/curriculum/curriculum.repository';
 import { UserService } from 'src/features/user/user.service';
 
-// the curriculum repository pulls drizzle + an ESM-only transitive dep (uuid) that jest cannot parse;
+// the curriculum repository pulls an ESM-only transitive dep (uuid) that jest cannot parse;
 // the service only needs the repository token, so swap the module for a bare class
 jest.mock('src/features/curriculum/curriculum.repository', () => ({
   CurriculumRepository: class CurriculumRepository {},

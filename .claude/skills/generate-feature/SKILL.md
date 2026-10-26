@@ -16,7 +16,7 @@ Ask the user (or infer from the request) before generating:
 
 1. **Feature name** — singular, lowercase (e.g. `session`). Controller route is the plural (`sessions`).
 2. **Fields** — name, type, required/optional, validation (min/max/uuid/enum/url/regex).
-3. Whether it needs a **Drizzle table** in `src/database/schema.ts` (usually yes for a new domain).
+3. Whether it needs a **Prisma model** in `prisma/schema.prisma` (usually yes for a new domain).
 4. Which **sibling services** it depends on (`UserService`, `NotificationService`, …) so their
    modules get imported.
 
@@ -29,7 +29,7 @@ dependency order (each depends on the one above):
 
 1. **generate-db-table** — add the `pgTable`/`pgEnum` to `schema.ts`, generate migration (if a new domain).
 2. **generate-entity** — Zod schema + DTOs under `src/packages/entities/{name}/`.
-3. **generate-repository** — Drizzle data access.
+3. **generate-repository** — Prisma data access.
 4. **generate-service** — business logic + validation.
 5. **generate-controller** — routes + Swagger.
 6. **generate-module** — module file + wire into `app.module.ts`.
@@ -47,7 +47,7 @@ For a feature named `foo`:
 - Class prefix: `Foo` → `FooController`, `FooService`, `FooRepository`, `FooModule`
 - Route: `@Controller('foos')` (plural)
 - Entities: `src/packages/entities/foo/` with `foo.schema.ts`, `foo.dto.ts`, `index.ts`
-- Drizzle table: `export const foos = pgTable('foos', { ... })`
+- Prisma model: `model Foo { ... @@map("foos") }` in `prisma/schema.prisma`
 - Swagger: `src/data/swaggers/data/foo.swagger.ts` (`FOO_SWAGGERS_DATA`) +
   `src/data/swaggers/messages/foo.msg.ts` (`FOO_SWAGGER_MESSAGES`)
 
@@ -56,7 +56,7 @@ For a feature named `foo`:
 - **Entity** — `createFooSchema`, `updateFooSchema = createFooSchema.partial()`,
   `getFoosQuerySchema` using plain `z.coerce` pagination (NOT `z.preprocess`). Reused enums
   as `z.enum([...])`.
-- **Repository** — inject `DRIZZLE`, methods `getFooByField`, `create`, `getFoos`
+- **Repository** — inject `PrismaService`, methods `getFooByField`, `create`, `getFoos`
   (returns `{ foos, pagination }` — list key named after the resource), `getFoo`, `delFoo`.
   Use the object-shaped `buildListWhereClause({ search, searchableColumns, filters, filterColumns })`.
 - **Service** — `Logger`, methods suffixed `...Service` (`createFooService`, `getFoosService`,

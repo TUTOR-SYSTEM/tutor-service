@@ -17,33 +17,9 @@
  */
 import 'dotenv/config';
 import { randomUUID } from 'node:crypto';
-import { and, eq, ilike, like } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/postgres-js';
-import postgres from 'postgres';
-import * as schema from '../src/database/schema';
-import {
-  users,
-  classes,
-  classStudents,
-  sessions,
-  tuitions,
-  notifications,
-} from '../src/database/schema';
+import { Prisma } from '@prisma/client';
+import { createPrisma } from './lib/prisma';
 import { hashData } from '../src/packages/helpers/hashingData.helper';
-
-function resolveDatabaseUrl(): string {
-  const databaseUrl = process.env.DATABASE_URL?.trim();
-  if (databaseUrl) return databaseUrl;
-  const host = process.env.POSTGRES_HOST?.trim() || 'localhost';
-  const port = process.env.POSTGRES_PORT?.trim() || '5433';
-  const db = process.env.POSTGRES_DB?.trim() || 'backends_db';
-  const user = process.env.POSTGRES_USER?.trim() || 'postgres';
-  const password = process.env.POSTGRES_PASSWORD?.trim() || 'postgres';
-  const url = new URL(`postgres://${host}:${port}/${db}`);
-  url.username = user;
-  url.password = password;
-  return url.toString();
-}
 
 const TUTOR_EMAIL = process.env.TUTOR_EMAIL?.trim() || 'dang04223@gmail.com';
 const CODE_PREFIX = 'DSH-';
@@ -69,27 +45,27 @@ const CLASS_DEFS = [
 const NUM_STUDENTS = 10;
 
 async function main(): Promise<void> {
-  const client = postgres(resolveDatabaseUrl());
-  const db = drizzle(client, { schema });
+  const prisma = createPrisma();
 
   try {
     // 1. Resolve tutor (create if missing) ─────────────────────────────────
-    let [tutor] = await db
-      .select({ id: users.id, role: users.role })
-      .from(users)
-      .where(ilike(users.email, TUTOR_EMAIL))
-      .limit(1);
+    let tutor = await prisma.user.findFirst({
+      where: { email: { equals: TUTOR_EMAIL, mode: 'insensitive' } },
+      select: { id: true, role: true },
+    });
 
     if (!tutor) {
       const id = randomUUID();
-      await db.insert(users).values({
-        id,
-        email: TUTOR_EMAIL,
-        username: 'tutor_' + id.slice(0, 8),
-        firstName: 'Tutor',
-        lastName: 'Demo',
-        password: await hashData('Tutor@123456'),
-        role: 'TUTOR',
+      await prisma.user.create({
+        data: {
+          id,
+          email: TUTOR_EMAIL,
+          username: 'tutor_' + id.slice(0, 8),
+          firstName: 'Tutor',
+          lastName: 'Demo',
+          password: await hashData('Tutor@123456'),
+          role: 'TUTOR',
+        },
       });
       tutor = { id, role: 'TUTOR' };
       console.log(`✓ created tutor ${TUTOR_EMAIL}`);
@@ -102,35 +78,35 @@ async function main(): Promise<void> {
     const hashed = await hashData('Student@123456');
     for (let i = 0; i < NUM_STUDENTS; i++) {
       const email = `dsh.student${i + 1}@student.dev`;
-      const [existing] = await db
-        .select({ id: users.id })
-        .from(users)
-        .where(ilike(users.email, email))
-        .limit(1);
+      const existing = await prisma.user.findFirst({
+        where: { email: { equals: email, mode: 'insensitive' } },
+        select: { id: true },
+      });
       if (existing) {
         studentIds.push(existing.id);
         continue;
       }
       const id = randomUUID();
-      await db.insert(users).values({
-        id,
-        email,
-        username: `dsh_student${i + 1}`,
-        firstName: pick(FIRST_NAMES, i),
-        lastName: pick(LAST_NAMES, i),
-        password: hashed,
-        role: 'STUDENT',
+      await prisma.user.create({
+        data: {
+          id,
+          email,
+          username: `dsh_student${i + 1}`,
+          firstName: pick(FIRST_NAMES, i),
+          lastName: pick(LAST_NAMES, i),
+          password: hashed,
+          role: 'STUDENT',
+        },
       });
       studentIds.push(id);
     }
     console.log(`✓ students    ${studentIds.length}`);
 
     // 3. Wipe previously seeded classes (cascade removes sessions/tuitions/enrollments)
-    const deleted = await db
-      .delete(classes)
-      .where(and(eq(classes.tutorId, tutorId), like(classes.code, `${CODE_PREFIX}%`)))
-      .returning({ id: classes.id });
-    if (deleted.length) console.log(`✓ cleaned     ${deleted.length} old seeded classes`);
+    const { count: deleted } = await prisma.class.deleteMany({
+      where: { tutorId, code: { startsWith: CODE_PREFIX } },
+    });
+    if (deleted) console.log(`✓ cleaned     ${deleted} old seeded classes`);
 
     const now = new Date();
     const year = now.getFullYear();
@@ -144,19 +120,21 @@ async function main(): Promise<void> {
     for (let c = 0; c < CLASS_DEFS.length; c++) {
       const def = CLASS_DEFS[c];
       const classId = randomUUID();
-      await db.insert(classes).values({
-        id: classId,
-        name: def.name,
-        code: `${CODE_PREFIX}${year}-${c + 1}-${randomUUID().slice(0, 4)}`,
-        subject: def.subject,
-        tuition: money(def.tuition),
-        description: `Lớp ${def.name} — dữ liệu demo dashboard`,
-        status: 'OPEN',
-        format: c % 2 === 0 ? 'OFFLINE' : 'ONLINE',
-        location: c % 2 === 0 ? 'Phòng A' + (c + 1) : null,
-        startTime: new Date(year, 0, 5),
-        endTime: new Date(year, 11, 20),
-        tutorId,
+      await prisma.class.create({
+        data: {
+          id: classId,
+          name: def.name,
+          code: `${CODE_PREFIX}${year}-${c + 1}-${randomUUID().slice(0, 4)}`,
+          subject: def.subject,
+          tuition: money(def.tuition),
+          description: `Lớp ${def.name} — dữ liệu demo dashboard`,
+          status: 'OPEN',
+          format: c % 2 === 0 ? 'OFFLINE' : 'ONLINE',
+          location: c % 2 === 0 ? 'Phòng A' + (c + 1) : null,
+          startTime: new Date(year, 0, 5),
+          endTime: new Date(year, 11, 20),
+          tutorId,
+        },
       });
 
       // Enroll a rotating slice of students (4–7 per class)
@@ -167,13 +145,13 @@ async function main(): Promise<void> {
         if (enrolled.includes(sid)) continue;
         enrolled.push(sid);
       }
-      await db
-        .insert(classStudents)
-        .values(enrolled.map((studentId) => ({ classId, studentId })))
-        .onConflictDoNothing();
+      await prisma.classStudent.createMany({
+        data: enrolled.map((studentId) => ({ classId, studentId })),
+        skipDuplicates: true,
+      });
 
       // Sessions: one per week on the class weekday, across the whole year.
-      const sessionRows: (typeof sessions.$inferInsert)[] = [];
+      const sessionRows: Prisma.ClassSessionCreateManyInput[] = [];
       let sessionNumber = 0;
       const cursor = new Date(year, 0, 1);
       // advance to first matching weekday
@@ -191,7 +169,6 @@ async function main(): Promise<void> {
           sessionNumber,
           startAt,
           endAt,
-          format: c % 2 === 0 ? 'OFFLINE' : 'ONLINE',
           location: c % 2 === 0 ? 'Phòng A' + (c + 1) : null,
           status: isPast ? 'COMPLETED' : 'SCHEDULED',
         });
@@ -209,18 +186,17 @@ async function main(): Promise<void> {
           sessionNumber: ++sessionNumber,
           startAt: s,
           endAt: e,
-          format: c % 2 === 0 ? 'OFFLINE' : 'ONLINE',
           location: c % 2 === 0 ? 'Phòng A' + (c + 1) : null,
           status: 'SCHEDULED',
         });
       }
-      await db.insert(sessions).values(sessionRows);
+      await prisma.classSession.createMany({ data: sessionRows });
       totalSessions += sessionRows.length;
 
       // Tuitions: one per student per month (Jan..currentMonth+1).
       // Past months → PAID with paidDate in that month (feeds the revenue chart).
       // Current month → UNPAID. A slice of past ones → OVERDUE for variety.
-      const tuitionRows: (typeof tuitions.$inferInsert)[] = [];
+      const tuitionRows: Prisma.TuitionCreateManyInput[] = [];
       for (let s = 0; s < enrolled.length; s++) {
         const studentId = enrolled[s];
         for (let m = 0; m <= currentMonth; m++) {
@@ -251,7 +227,7 @@ async function main(): Promise<void> {
           });
         }
       }
-      await db.insert(tuitions).values(tuitionRows);
+      await prisma.tuition.createMany({ data: tuitionRows });
       totalTuitions += tuitionRows.length;
 
       console.log(
@@ -260,17 +236,17 @@ async function main(): Promise<void> {
     }
 
     // 5. A few recent notifications for the tutor ──────────────────────────
-    await db
-      .delete(notifications)
-      .where(and(eq(notifications.userId, tutorId), ilike(notifications.title, '[demo]%')));
+    await prisma.notification.deleteMany({
+      where: { userId: tutorId, title: { startsWith: '[demo]', mode: 'insensitive' } },
+    });
     const notes = [
       { type: 'TUITION' as const, title: '[demo] Học phí mới được thanh toán', content: 'Một học sinh vừa đóng học phí tháng này.' },
       { type: 'STUDENT' as const, title: '[demo] Học sinh mới đăng ký', content: 'Có học sinh mới tham gia lớp Toán 10A.' },
       { type: 'SYSTEM' as const, title: '[demo] Nhắc lịch dạy', content: 'Bạn có buổi dạy hôm nay lúc 17:30.' },
       { type: 'TUTOR' as const, title: '[demo] Báo cáo tuần', content: 'Tổng kết hoạt động giảng dạy trong tuần đã sẵn sàng.' },
     ];
-    await db.insert(notifications).values(
-      notes.map((n, i) => ({
+    await prisma.notification.createMany({
+      data: notes.map((n, i) => ({
         userId: tutorId,
         type: n.type,
         title: n.title,
@@ -279,7 +255,7 @@ async function main(): Promise<void> {
         isRead: i > 1,
         createdAt: new Date(now.getTime() - i * 3_600_000),
       })),
-    );
+    });
     console.log(`✓ notifications ${notes.length}`);
 
     console.log('\n── Summary ─────────────────────────────────────────────');
@@ -290,7 +266,7 @@ async function main(): Promise<void> {
     console.log(`  paid revenue:  ${paidRevenue.toLocaleString('vi-VN')} đ (year ${year})`);
     console.log(`\n✓ Done. Log in as ${TUTOR_EMAIL} and open the dashboard.\n`);
   } finally {
-    await client.end({ timeout: 5 });
+    await prisma.$disconnect();
   }
 }
 

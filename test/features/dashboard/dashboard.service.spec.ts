@@ -5,7 +5,7 @@ import { DashboardService } from 'src/features/dashboard/dashboard.service';
 import { DashboardRepository } from 'src/features/dashboard/dashboard.repository';
 import { UserService } from 'src/features/user/user.service';
 
-// dashboard.repository pulls drizzle + an ESM-only transitive dep (uuid) that jest cannot
+// dashboard.repository pulls an ESM-only transitive dep (uuid) that jest cannot
 // parse; the service only needs the repository token, so swap the module for a bare class
 jest.mock('src/features/dashboard/dashboard.repository', () => ({
   DashboardRepository: class DashboardRepository {},

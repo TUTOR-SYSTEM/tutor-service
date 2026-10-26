@@ -1,47 +1,24 @@
 #!/usr/bin/env bun
 import 'dotenv/config';
-import { randomUUID } from 'node:crypto';
-import { eq } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/postgres-js';
-import postgres from 'postgres';
-import * as schema from '../src/database/schema';
-import { grades } from '../src/database/schema';
-
-function resolveDatabaseUrl(): string {
-  const databaseUrl = process.env.DATABASE_URL?.trim();
-  if (databaseUrl) return databaseUrl;
-
-  const host = process.env.POSTGRES_HOST?.trim() || 'localhost';
-  const port = process.env.POSTGRES_PORT?.trim() || '5433';
-  const db = process.env.POSTGRES_DB?.trim() || 'backends_db';
-  const user = process.env.POSTGRES_USER?.trim() || 'postgres';
-  const password = process.env.POSTGRES_PASSWORD?.trim() || 'postgres';
-
-  const url = new URL(`postgres://${host}:${port}/${db}`);
-  url.username = user;
-  url.password = password;
-  return url.toString();
-}
+import { createPrisma } from './lib/prisma';
 
 async function main(): Promise<void> {
-  const url = resolveDatabaseUrl();
-  const client = postgres(url);
-  const db = drizzle(client, { schema });
+  const prisma = createPrisma();
 
   for (let level = 1; level <= 12; level++) {
     const name = `Lớp ${level}`;
 
-    const existing = await db.select({ id: grades.id }).from(grades).where(eq(grades.level, level)).limit(1);
-    if (existing.length > 0) {
+    const existing = await prisma.grade.findUnique({ where: { level }, select: { id: true } });
+    if (existing) {
       console.log(`Skipped (already exists): ${name}`);
       continue;
     }
 
-    await db.insert(grades).values({ id: randomUUID(), name, level });
+    await prisma.grade.create({ data: { name, level } });
     console.log(`Created: ${name}`);
   }
 
-  await client.end({ timeout: 5 });
+  await prisma.$disconnect();
 }
 
 main().catch((err: unknown) => {

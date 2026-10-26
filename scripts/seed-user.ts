@@ -1,29 +1,6 @@
 import 'dotenv/config';
-import { randomUUID } from 'node:crypto';
-import { eq, ilike } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/postgres-js';
-import postgres from 'postgres';
-import * as schema from '../src/database/schema';
-import { users } from '../src/database/schema';
+import { createPrisma } from './lib/prisma';
 import { hashData } from '../src/packages/helpers/hashingData.helper';
-
-function resolveDatabaseUrl(): string {
-  const databaseUrl = process.env.DATABASE_URL?.trim();
-  if (databaseUrl) {
-    return databaseUrl;
-  }
-
-  const host = process.env.POSTGRES_HOST?.trim() || 'localhost';
-  const port = process.env.POSTGRES_PORT?.trim() || '5433';
-  const db = process.env.POSTGRES_DB?.trim() || 'backends_db';
-  const user = process.env.POSTGRES_USER?.trim() || 'postgres';
-  const password = process.env.POSTGRES_PASSWORD?.trim() || 'postgres';
-
-  const url = new URL(`postgres://${host}:${port}/${db}`);
-  url.username = user;
-  url.password = password;
-  return url.toString();
-}
 
 const SEED_ACCOUNTS = [
   {
@@ -63,48 +40,45 @@ const SEED_ACCOUNTS = [
 }>;
 
 async function main(): Promise<void> {
-  const url = resolveDatabaseUrl();
-  const client = postgres(url);
-  const db = drizzle(client, { schema });
+  const prisma = createPrisma();
 
   for (const account of SEED_ACCOUNTS) {
-    const existing = await db
-      .select({ id: users.id })
-      .from(users)
-      .where(ilike(users.email, account.email))
-      .limit(1);
+    const existing = await prisma.user.findFirst({
+      where: { email: { equals: account.email, mode: 'insensitive' } },
+      select: { id: true },
+    });
 
-    if (existing.length > 0) {
+    if (existing) {
       console.log(`Skipped (already exists): ${account.email}`);
       continue;
     }
 
-    const usernameTaken = await db
-      .select({ id: users.id })
-      .from(users)
-      .where(eq(users.username, account.username))
-      .limit(1);
+    const usernameTaken = await prisma.user.findUnique({
+      where: { username: account.username },
+      select: { id: true },
+    });
 
-    if (usernameTaken.length > 0) {
+    if (usernameTaken) {
       console.error(`Username already taken: ${account.username}`);
       continue;
     }
 
     const hashedPassword = await hashData(account.password);
-    await db.insert(users).values({
-      id: randomUUID(),
+    await prisma.user.create({
+      data: {
       email: account.email,
       username: account.username,
       firstName: account.firstName,
       lastName: account.lastName,
       password: hashedPassword,
       role: account.role,
+      },
     });
 
     console.log(`Created [${account.role}]: ${account.email} (username: ${account.username})`);
   }
 
-  await client.end({ timeout: 5 });
+  await prisma.$disconnect();
 }
 
 main().catch((err: unknown) => {

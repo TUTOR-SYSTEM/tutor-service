@@ -30,7 +30,7 @@ bun scripts/recreate-db.ts --confirm=<db name>   # Drop → push schema → seed
 | `bun run test:e2e` | Jest with `test/jest-e2e.json` config (only if Node is available — Bun cannot run Jest 29). |
 | `bun run test:cov` | Bun test with `--coverage` (`c8`-backed). |
 | `bun run db:push` | Push schema directly (dev only — skips migration review). |
-| `bun run db:seed:user` / `bun run db:seed:users-bulk` | Bun scripts, not Drizzle. |
+| `bun run db:seed:user` / `bun run db:seed:users-bulk` | Bun scripts using Prisma Client (`scripts/lib/prisma.ts`). |
 
 ## Architecture
 
@@ -38,7 +38,7 @@ bun scripts/recreate-db.ts --confirm=<db name>   # Drop → push schema → seed
 - **Global JWT guard** via `APP_GUARD` in `app.module.ts`. Use `@Public()` to bypass.
 - **Response shape** enforced by `ResponseInterceptor`: `{ statusCode, message, data, timestamp, method, path }`.
 - **Validation**: Zod v4 schemas in `src/packages/entities/{domain}/{domain}.schema.ts`, DTO types in `*.dto.ts`. Used via `ZodValidationPipe`.
-- **Database**: Drizzle ORM (`postgres.js` driver). Single schema file `src/database/schema.ts`. Drizzle injection token is the string `'DRIZZLE'`.
+- **Database**: Prisma ORM. Single schema file `prisma/schema.prisma`; inject `PrismaService` (`src/database/prisma.service.ts`).
 - **Repository pattern is optional**: `category`, `wallet`, `transaction` have repositories; `auth`, `user` do not.
 
 ## Imports
@@ -48,7 +48,7 @@ bun scripts/recreate-db.ts --confirm=<db name>   # Drop → push schema → seed
 import { Public } from '@packages/decorators';
 
 // Relative imports within features (no alias):
-import { DRIZZLE } from '../../database/database.module';
+import { PrismaService } from '../../database/prisma.service';
 ```
 
 Only `@packages/*` is aliased. Do not create new aliases.
@@ -71,7 +71,7 @@ Only `@packages/*` is aliased. Do not create new aliases.
 ## ESLint & TypeScript quirks
 
 - `strictNullChecks: true` only (not full `strict`). `noImplicitAny: false`.
-- ESLint uses `recommendedTypeChecked` — slow, needs all referenced .ts files. Ignores `drizzle/`, `dist/`, `coverage/`.
+- ESLint uses `recommendedTypeChecked` — slow, needs all referenced .ts files. Ignores `prisma/`, `dist/`, `coverage/`.
 - Rules `@typescript-eslint/no-explicit-any: off`, `prettier/prettier: off`.
 - Certain files (redis, mailer, jwt strategy) have relaxed `no-unsafe-*` rules.
 
@@ -88,24 +88,25 @@ Only `@packages/*` is aliased. Do not create new aliases.
 - Persistent volume `postgres_data` for DB.
 - Healthcheck on Postgres container (used by no other service, but available).
 
-## Drizzle migrations
+## Prisma migrations
 
 ```bash
-bun run db:generate   # After editing src/database/schema.ts
-bun run db:migrate    # Apply to DB
+bun run db:migrate:dev -- --name <change>   # After editing prisma/schema.prisma (creates + applies)
+bun run db:migrate                          # Apply pending migrations (prisma migrate deploy)
+bun run db:generate                         # Regenerate the Prisma Client only
 ```
 
-Migrations land in `drizzle/`. Drizzle config in `drizzle.config.ts` duplicates the URL resolution logic from `DatabaseModule`.
+Migrations land in `prisma/migrations/`. `PrismaService` and `scripts/lib/prisma.ts` resolve the URL from `DATABASE_URL` or `POSTGRES_*`; the Prisma CLI itself reads `DATABASE_URL`.
 
 ## Skills (`.opencode/skills/`)
 
 | Skill | When to use |
 |---|---|---|
-| `drizzle-orm` | Drizzle queries, schema changes, migrations, seeding |
+| `drizzle-orm` | (legacy — pre-Prisma) Drizzle queries, schema changes, migrations, seeding |
 | `jwt-auth` | Auth flows, JWT tokens, guards, forgot/reset password |
 | `wallet-transaction` | Wallet & transaction CRUD, balance math, DTO/schema |
 | `presence` | Real-time Socket.io presence module (online/offline tracking via Redis) |
 | `module-consistency` | Ensure controller, service, repository, module stay in sync |
 | `feature-patterns` | Write new feature or modify existing — full layer-by-layer conventions |
 
-**Note**: `drizzle-kit push` requires `--force` in non-interactive shells (CI, scripts) to skip the TTY confirmation prompt.
+**Note**: `prisma migrate dev` and `prisma db push` prompt on destructive changes; in non-interactive shells use `prisma migrate deploy` (CI/prod) and never `--force-reset` automatically.

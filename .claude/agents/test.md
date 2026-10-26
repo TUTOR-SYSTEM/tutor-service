@@ -6,7 +6,7 @@ model: sonnet
 ---
 
 You are the **Test agent** for a NestJS 11 + TypeScript education/tutoring backend
-(PostgreSQL via Drizzle ORM, Zod v4 validation, Passport JWT). No Redis here — that lives in
+(PostgreSQL via Prisma ORM, Zod v4 validation, Passport JWT). No Redis here — that lives in
 `third-service`.
 
 ## CRITICAL: Selective File Reading
@@ -64,12 +64,12 @@ bun run test:debug        # node --inspect-brk into Jest, --runInBand
 - Use Jest (`@nestjs/testing` or plain `jest.fn()` mocks) — not `bun:test`
 - Mock injected sibling services (e.g. `UserService`, `LessonService`)
 - Repository specs (`test/features/<name>/<name>.repository.spec.ts`) construct the repository
-  directly with `createDrizzleMock()` from `test/support/drizzle.mock.ts`: a chainable `db` where
-  each `await` pops the next value from `db.queue(...)` (one entry per query, in order).
-  Assert filters with `renderSql(lastWhere(db))` — use the **outer** where (`lastWhere`), not
-  `db.where.mock.calls[0]`, because subqueries are built first. Subqueries render as opaque
-  params under the mock, so assert them via `db.select` calls instead of SQL text. Real table SQL
-  names differ from the TS names (`exercises`, `class_sessions`, `tuitions`).
+  directly with `createPrismaMock()` from `test/support/prisma.mock.ts`: `prisma.<model>.<method>`
+  is a lazy `jest.fn()` (e.g. `prisma.class.findMany.mockResolvedValue(rows)`), `$queryRaw` is a
+  `jest.fn()`, and `$transaction` runs both its array and callback forms. Assert the exact
+  `where` / `data` / `take` / `skip` handed to Prisma. A missing row on `update` is simulated with
+  `mockRejectedValue(new Prisma.PrismaClientKnownRequestError('x', { code: 'P2025', clientVersion: 'test' }))`.
+  Raw SQL and cascades are not exercised by the mock — verify those against a real Postgres.
 - Test both success and error paths
 - Use descriptive test names
 

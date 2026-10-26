@@ -21,8 +21,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Inject } from '@nestjs/common';
-import { drizzle } from 'drizzle-orm/postgres-js';
-import { DRIZZLE } from '../../database/database.module';
+import { PrismaService } from '../../database/prisma.service';
 import { CreateFooDto, GetFoosQueryDto } from '@packages/entities/foo';
 import { checkUuidValid, generateCode } from '@packages/helpers';
 import { FooRepository } from './foo.repository';
@@ -33,7 +32,7 @@ export class FooService {
   private readonly logger = new Logger(FooService.name);
   constructor(
     private readonly repo: FooRepository,
-    @Inject(DRIZZLE) private readonly db: ReturnType<typeof drizzle>,
+    private readonly prisma: PrismaService,
     private readonly user: UserService, // + other feature services it depends on
   ) {}
   // createFooService, getFoosService, getFooService, delFooService
@@ -89,5 +88,5 @@ items })` (one multi-row insert — do NOT loop single inserts).
   `ConflictException` for unresolvable uniqueness collisions.
 - Inject sibling feature services (`UserService`, `NotificationService`, …) rather than
   re-querying their tables directly; import their modules in `foo.module.ts`.
-- Keep Drizzle table access in the repository; the injected `db` is only for cross-table
+- Keep Prisma model access in the repository; the injected `prisma` is only for cross-table
   transactions when needed.

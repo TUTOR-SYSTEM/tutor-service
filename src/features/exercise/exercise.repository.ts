@@ -1,33 +1,35 @@
-import { Inject, Injectable } from '@nestjs/common';
-import { and, count, desc, eq, inArray, or } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/postgres-js';
-import { DRIZZLE } from '../../database/database.module';
+import { Injectable } from '@nestjs/common';
+import { Exercise, ExerciseStatus, Prisma } from '@prisma/client';
+import { PrismaService, isRecordNotFound } from '../../database/prisma.service';
 import type {
   CreateExerciseDto,
   ExerciseDetailDto,
   getExerciseDto,
 } from '@packages/entities/exercise';
-import { classes, exercise, sessions, users } from 'src/database/schema';
+import { buildPagination } from '@packages/helpers';
 
-type ExerciseRow = typeof exercise.$inferSelect;
+type ExerciseUpdate = Partial<{
+  exerciseUrls: Prisma.InputJsonValue;
+  status: ExerciseStatus;
+  score: string | null;
+  comment: string | null;
+  gradedAt: Date | null;
+}>;
 
 @Injectable()
 export class ExerciseRepository {
-  constructor(
-    @Inject(DRIZZLE)
-    private readonly db: ReturnType<typeof drizzle>,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
-  // numeric columns come back from postgres as strings — expose score as a number for the API
-  private map(row: ExerciseRow): ExerciseDetailDto {
+  // numeric columns are Prisma Decimals — expose score as a number for the API
+  private map(row: Exercise): ExerciseDetailDto {
     return {
       id: row.id,
       lessonId: row.lessonId,
       sessionId: row.sessionId,
       tutorId: row.tutorId,
       studentId: row.studentId,
-      issueUrls: row.issueUrls ?? [],
-      exerciseUrls: row.exerciseUrls ?? [],
+      issueUrls: (row.issueUrls ?? []) as ExerciseDetailDto['issueUrls'],
+      exerciseUrls: (row.exerciseUrls ?? []) as ExerciseDetailDto['exerciseUrls'],
       status: row.status,
       score: row.score !== null ? Number(row.score) : null,
       comment: row.comment,
@@ -38,9 +40,8 @@ export class ExerciseRepository {
   }
 
   async create({ data }: { data: CreateExerciseDto }): Promise<ExerciseDetailDto> {
-    const [row] = await this.db
-      .insert(exercise)
-      .values({
+    const row = await this.prisma.exercise.create({
+      data: {
         tutorId: data.tutorId,
         studentId: data.studentId,
         sessionId: data.sessionId ?? null,
@@ -48,8 +49,8 @@ export class ExerciseRepository {
         issueUrls: data.issueUrls ?? [],
         exerciseUrls: data.exerciseUrls ?? [],
         status: data.status ?? 'SUBMITTED',
-      })
-      .returning();
+      },
+    });
     return this.map(row);
   }
 
@@ -61,16 +62,12 @@ export class ExerciseRepository {
     studentId: string;
     sessionId: string;
   }): Promise<ExerciseDetailDto | null> {
-    const [row] = await this.db
-      .select()
-      .from(exercise)
-      .where(and(eq(exercise.studentId, studentId), eq(exercise.sessionId, sessionId)))
-      .limit(1);
+    const row = await this.prisma.exercise.findFirst({ where: { studentId, sessionId } });
     return row ? this.map(row) : null;
   }
 
   async findById({ id }: { id: string }): Promise<ExerciseDetailDto | null> {
-    const [row] = await this.db.select().from(exercise).where(eq(exercise.id, id)).limit(1);
+    const row = await this.prisma.exercise.findUnique({ where: { id } });
     return row ? this.map(row) : null;
   }
 
@@ -79,71 +76,50 @@ export class ExerciseRepository {
   async findAll({ userId, query }: { userId: string; query: getExerciseDto }) {
     const { page, limit, sessionId, studentId, classId, tutorId } = query;
 
-    const accessWhere = or(eq(exercise.tutorId, userId), eq(exercise.studentId, userId));
-
-    const conditions = [accessWhere];
-    if (sessionId) conditions.push(eq(exercise.sessionId, sessionId));
-    if (studentId) conditions.push(eq(exercise.studentId, studentId));
-    if (tutorId) conditions.push(eq(exercise.tutorId, tutorId));
-    if (classId) {
-      const classSessionIds = this.db
-        .select({ id: sessions.id })
-        .from(sessions)
-        .where(eq(sessions.classId, classId));
-      conditions.push(inArray(exercise.sessionId, classSessionIds));
-    }
-
-    const whereClause = and(...conditions);
-
-    const [totalRow] = await this.db.select({ total: count() }).from(exercise).where(whereClause);
-    const total = Number(totalRow?.total ?? 0);
-    const offset = (page - 1) * limit;
+    const conditions: Prisma.ExerciseWhereInput[] = [
+      { OR: [{ tutorId: userId }, { studentId: userId }] },
+    ];
+    if (sessionId) conditions.push({ sessionId });
+    if (studentId) conditions.push({ studentId });
+    if (tutorId) conditions.push({ tutorId });
+    if (classId) conditions.push({ session: { classId } });
+    const where: Prisma.ExerciseWhereInput = { AND: conditions };
 
     // enrich each row with the session, its class, and the student — the grades dashboard
     // renders these relations, while the flat fields keep the detail/submit UIs working.
-    const rows = await this.db
-      .select({
-        exercise,
-        session: {
-          id: sessions.id,
-          sessionNumber: sessions.sessionNumber,
-          classId: sessions.classId,
+    const [total, rows] = await Promise.all([
+      this.prisma.exercise.count({ where }),
+      this.prisma.exercise.findMany({
+        where,
+        include: {
+          session: {
+            select: {
+              id: true,
+              sessionNumber: true,
+              classId: true,
+              class: { select: { id: true, name: true, code: true } },
+            },
+          },
+          student: {
+            select: { id: true, firstName: true, lastName: true, userCode: true, avatar: true },
+          },
         },
-        class: {
-          id: classes.id,
-          name: classes.name,
-          code: classes.code,
-        },
-        student: {
-          id: users.id,
-          firstName: users.firstName,
-          lastName: users.lastName,
-          userCode: users.userCode,
-          avatar: users.avatar,
-        },
-      })
-      .from(exercise)
-      .leftJoin(sessions, eq(exercise.sessionId, sessions.id))
-      .leftJoin(classes, eq(sessions.classId, classes.id))
-      .leftJoin(users, eq(exercise.studentId, users.id))
-      .where(whereClause)
-      .orderBy(desc(exercise.updatedAt), exercise.id)
-      .limit(limit)
-      .offset(offset);
+        orderBy: [{ updatedAt: 'desc' }, { id: 'asc' }],
+        take: limit,
+        skip: (page - 1) * limit,
+      }),
+    ]);
 
     return {
-      data: rows.map((row) => ({
-        ...this.map(row.exercise),
-        session: row.session?.id ? row.session : null,
-        class: row.class?.id ? row.class : null,
-        student: row.student,
+      data: rows.map(({ session, student, ...row }) => ({
+        ...this.map(row),
+        session: session
+          ? { id: session.id, sessionNumber: session.sessionNumber, classId: session.classId }
+          : null,
+        class: session?.class ?? null,
+        student,
       })),
-      pagination: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
-      },
+      pagination: buildPagination(total, page, limit),
     };
   }
 
@@ -152,19 +128,14 @@ export class ExerciseRepository {
     data,
   }: {
     id: string;
-    data: Partial<{
-      exerciseUrls: ExerciseRow['exerciseUrls'];
-      status: ExerciseRow['status'];
-      score: string | null;
-      comment: string | null;
-      gradedAt: Date | null;
-    }>;
+    data: ExerciseUpdate;
   }): Promise<ExerciseDetailDto | null> {
-    const [row] = await this.db
-      .update(exercise)
-      .set({ ...data, updatedAt: new Date() })
-      .where(eq(exercise.id, id))
-      .returning();
-    return row ? this.map(row) : null;
+    try {
+      const row = await this.prisma.exercise.update({ where: { id }, data });
+      return this.map(row);
+    } catch (error) {
+      if (isRecordNotFound(error)) return null;
+      throw error;
+    }
   }
 }

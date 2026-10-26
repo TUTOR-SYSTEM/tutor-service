@@ -10,8 +10,8 @@ tutor-service/
 │   ├── app.controller.ts          # Health-check controller
 │   ├── app.service.ts             # Health-check service
 │   ├── database/
-│   │   ├── database.module.ts     # Global Drizzle ORM provider (postgres.js)
-│   │   └── schema.ts              # Real tables: users, grades, classes, class_students, schedules,
+│   │   ├── database.module.ts     # Global module exporting PrismaService (PrismaClient)
+│   │   └── prisma.service.ts      # PrismaService; Prisma schema is prisma/schema.prisma. Real tables: users, grades, classes, class_students, schedules,
 │   │                               # class_sessions, curriculums, chapters, lessons, tuitions,
 │   │                               # notifications, student_scores, ai_messages, attendances,
 │   │                               # exercises, conversations, conversation_participants, messages
@@ -31,7 +31,7 @@ tutor-service/
 │       ├── interfaces/            # ApiResponseInterface, UserInterface
 │       ├── pipes/                 # ZodValidationPipe
 │       └── strategy/              # Google/Facebook Passport strategies
-├── drizzle/                       # Auto-generated SQL migrations
+├── prisma/                        # schema.prisma + migrations/ (prisma migrate)
 ├── scripts/                       # Seed scripts (Bun runtime) — some (seed-categories/seed-wallet)
 │                                   # target dropped tables, don't run them
 └── test/                          # Jest + Supertest tests
@@ -44,7 +44,7 @@ features/{name}/
 ├── {name}.module.ts     # Module definition
 ├── {name}.controller.ts # Route handlers (@Body with ZodValidationPipe)
 ├── {name}.service.ts    # Business logic
-└── {name}.repository.ts # Drizzle DB access
+└── {name}.repository.ts # Prisma DB access (PrismaService)
 ```
 
 `class` is the canonical reference feature — see `.claude/rules/nestjs-feature-pattern.md` for

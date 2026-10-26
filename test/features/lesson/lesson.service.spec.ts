@@ -4,9 +4,8 @@ import { ERROR_MESSAGES } from 'src/data/constants';
 import { LessonService } from 'src/features/lesson/lesson.service';
 import { LessonRepository } from 'src/features/lesson/lesson.repository';
 import { CurriculumRepository } from 'src/features/curriculum/curriculum.repository';
-import { DRIZZLE } from 'src/database/database.module';
 
-// the lesson repository pulls drizzle + an ESM-only transitive dep (uuid) that jest cannot parse;
+// the lesson repository pulls an ESM-only transitive dep (uuid) that jest cannot parse;
 // the service only needs the repository token, so swap the module for a bare class
 jest.mock('src/features/lesson/lesson.repository', () => ({
   LessonRepository: class LessonRepository {},
@@ -44,7 +43,6 @@ describe('LessonService', () => {
         LessonService,
         { provide: LessonRepository, useValue: repo },
         { provide: CurriculumRepository, useValue: curriculumRepo },
-        { provide: DRIZZLE, useValue: {} },
       ],
     }).compile();
 

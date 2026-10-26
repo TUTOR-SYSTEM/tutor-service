@@ -1,141 +1,155 @@
+import { Prisma } from '@prisma/client';
 import { ScheduleRepository } from 'src/features/schedule/schedule.repository';
-import { classes, classStudents, schedules } from 'src/database/schema';
-import { createDrizzleMock, DrizzleMock, lastWhere, renderSql } from '../../support/drizzle.mock';
+import { createPrismaMock, PrismaMock } from '../../support/prisma.mock';
 
 const USER_ID = '11111111-1111-4111-8111-111111111111';
 const CLASS_ID = '22222222-2222-4222-8222-222222222222';
 const SCHEDULE_ID = '33333333-3333-4333-8333-333333333333';
 
 const item = {
-  dayOfWeek: 1,
+  dayOfWeek: 'MONDAY',
   startTime: '08:00',
   endTime: '09:30',
   format: 'ONLINE',
   location: 'Room 1',
 };
 
+const notFound = () =>
+  new Prisma.PrismaClientKnownRequestError('not found', { code: 'P2025', clientVersion: 'test' });
+
 describe('ScheduleRepository', () => {
-  let db: DrizzleMock;
+  let prisma: PrismaMock;
   let repo: ScheduleRepository;
 
   beforeEach(() => {
-    db = createDrizzleMock();
-    repo = new ScheduleRepository(db as never);
+    prisma = createPrismaMock();
+    repo = new ScheduleRepository(prisma as never);
   });
 
   describe('create', () => {
     it('inserts one schedule row and returns it', async () => {
-      db.queue([{ id: SCHEDULE_ID, classId: CLASS_ID }]);
+      prisma.schedule.create.mockResolvedValue({ id: SCHEDULE_ID, classId: CLASS_ID });
 
       const result = await repo.create({ data: { classId: CLASS_ID, ...item } as never });
 
       expect(result).toEqual({ id: SCHEDULE_ID, classId: CLASS_ID });
-      expect(db.insert).toHaveBeenCalledWith(schedules);
-      expect(db.values).toHaveBeenCalledWith({ classId: CLASS_ID, ...item });
+      expect(prisma.schedule.create).toHaveBeenCalledWith({ data: { classId: CLASS_ID, ...item } });
     });
   });
 
   describe('createMany', () => {
     it('does one multi-row insert stamping every item with the class id', async () => {
       const rows = [{ id: 'a' }, { id: 'b' }];
-      db.queue(rows);
+      prisma.schedule.createManyAndReturn.mockResolvedValue(rows);
 
       const result = await repo.createMany({
         classId: CLASS_ID,
-        items: [item, { ...item, dayOfWeek: 3 }] as never,
+        items: [item, { ...item, dayOfWeek: 'WEDNESDAY' }] as never,
       });
 
       expect(result).toEqual(rows);
-      expect(db.insert).toHaveBeenCalledTimes(1);
-      expect(db.values).toHaveBeenCalledWith([
-        { classId: CLASS_ID, ...item },
-        { classId: CLASS_ID, ...item, dayOfWeek: 3 },
-      ]);
+      expect(prisma.schedule.createManyAndReturn).toHaveBeenCalledTimes(1);
+      expect(prisma.schedule.createManyAndReturn).toHaveBeenCalledWith({
+        data: [
+          { classId: CLASS_ID, ...item },
+          { classId: CLASS_ID, ...item, dayOfWeek: 'WEDNESDAY' },
+        ],
+      });
     });
   });
 
   describe('getAll', () => {
     it('returns schedules with their class nested and pagination', async () => {
-      db.queue(
-        [{ total: '12' }],
-        [
-          {
-            schedule: { id: SCHEDULE_ID, classId: CLASS_ID, dayOfWeek: 1 },
-            class: { id: CLASS_ID, name: 'Math', code: 'M9', subject: 'MATH' },
-          },
-        ],
-      );
+      const row = {
+        id: SCHEDULE_ID,
+        classId: CLASS_ID,
+        dayOfWeek: 'MONDAY',
+        class: { id: CLASS_ID, name: 'Math', code: 'M9', subject: 'MATH' },
+      };
+      prisma.schedule.count.mockResolvedValue(12);
+      prisma.schedule.findMany.mockResolvedValue([row]);
 
       const result = await repo.getAll({
         userId: USER_ID,
         query: { page: '2', limit: '5' } as never,
       });
 
-      expect(result.schedules).toEqual([
-        {
-          id: SCHEDULE_ID,
-          classId: CLASS_ID,
-          dayOfWeek: 1,
-          class: { id: CLASS_ID, name: 'Math', code: 'M9', subject: 'MATH' },
-        },
-      ]);
+      expect(result.schedules).toEqual([row]);
       expect(result.pagination).toEqual({ total: 12, page: 2, limit: 5, totalPages: 3 });
-      expect(db.limit).toHaveBeenCalledWith(5);
-      expect(db.offset).toHaveBeenCalledWith(5);
+      expect(prisma.schedule.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ take: 5, skip: 5 }),
+      );
     });
 
     it('defaults to page 1 and limit 10 when the query omits them', async () => {
-      db.queue([{ total: 0 }], []);
+      prisma.schedule.count.mockResolvedValue(0);
+      prisma.schedule.findMany.mockResolvedValue([]);
 
       const result = await repo.getAll({ userId: USER_ID, query: {} as never });
 
       expect(result.pagination).toEqual({ total: 0, page: 1, limit: 10, totalPages: 0 });
-      expect(db.limit).toHaveBeenCalledWith(10);
-      expect(db.offset).toHaveBeenCalledWith(0);
+      expect(prisma.schedule.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ take: 10, skip: 0 }),
+      );
     });
 
     it('limits access to owned or enrolled classes and applies search and classId filters', async () => {
-      db.queue([{ total: 0 }], []);
+      prisma.schedule.count.mockResolvedValue(0);
+      prisma.schedule.findMany.mockResolvedValue([]);
 
       await repo.getAll({
         userId: USER_ID,
         query: { search: ' room ', classId: CLASS_ID } as never,
       });
 
-      const { sql, params } = renderSql(lastWhere(db));
-      // owned/enrolled class ids come from two subqueries
-      expect(db.select).toHaveBeenCalledWith({ id: classes.id });
-      expect(db.select).toHaveBeenCalledWith({ id: classStudents.classId });
-      expect(sql).toContain('ilike');
-      expect(params).toEqual(expect.arrayContaining(['%room%', CLASS_ID]));
+      const expectedWhere = {
+        AND: [
+          {
+            class: { OR: [{ tutorId: USER_ID }, { students: { some: { studentId: USER_ID } } }] },
+          },
+          {
+            AND: [
+              { OR: [{ location: { contains: 'room', mode: 'insensitive' } }] },
+              { classId: CLASS_ID },
+            ],
+          },
+        ],
+      };
+      expect(prisma.schedule.count).toHaveBeenCalledWith({ where: expectedWhere });
+      expect(prisma.schedule.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expectedWhere }),
+      );
     });
   });
 
   describe('getByClass / getById', () => {
-    it('getByClass returns every schedule of the class', async () => {
+    it('getByClass returns every schedule of the class ordered by day and start time', async () => {
       const rows = [{ id: 'a' }];
-      db.queue(rows);
+      prisma.schedule.findMany.mockResolvedValue(rows);
 
       await expect(repo.getByClass({ classId: CLASS_ID })).resolves.toEqual(rows);
-      expect(db.orderBy).toHaveBeenCalled();
+      expect(prisma.schedule.findMany).toHaveBeenCalledWith({
+        where: { classId: CLASS_ID },
+        orderBy: [{ dayOfWeek: 'asc' }, { startTime: 'asc' }],
+      });
     });
 
-    it('getById returns the first row', async () => {
-      db.queue([{ id: SCHEDULE_ID }]);
+    it('getById returns the row', async () => {
+      prisma.schedule.findUnique.mockResolvedValue({ id: SCHEDULE_ID });
 
       await expect(repo.getById({ id: SCHEDULE_ID })).resolves.toEqual({ id: SCHEDULE_ID });
     });
 
-    it('getById returns undefined when nothing matches', async () => {
-      db.queue([]);
+    it('getById returns null when nothing matches', async () => {
+      prisma.schedule.findUnique.mockResolvedValue(null);
 
-      await expect(repo.getById({ id: SCHEDULE_ID })).resolves.toBeUndefined();
+      await expect(repo.getById({ id: SCHEDULE_ID })).resolves.toBeNull();
     });
   });
 
   describe('update', () => {
-    it('sets the provided fields with a fresh updatedAt and returns the row', async () => {
-      db.queue([{ id: SCHEDULE_ID, location: 'Room 2' }]);
+    it('writes the provided fields and returns the row', async () => {
+      prisma.schedule.update.mockResolvedValue({ id: SCHEDULE_ID, location: 'Room 2' });
 
       const result = await repo.update({
         id: SCHEDULE_ID,
@@ -143,40 +157,37 @@ describe('ScheduleRepository', () => {
       });
 
       expect(result).toEqual({ id: SCHEDULE_ID, location: 'Room 2' });
-      expect(db.set).toHaveBeenCalledWith(
-        expect.objectContaining({ location: 'Room 2', updatedAt: expect.any(Date) }),
-      );
+      expect(prisma.schedule.update).toHaveBeenCalledWith({
+        where: { id: SCHEDULE_ID },
+        data: expect.objectContaining({ location: 'Room 2' }),
+      });
     });
 
-    it('returns undefined when the schedule does not exist', async () => {
-      db.queue([]);
+    it('returns null when the schedule does not exist', async () => {
+      prisma.schedule.update.mockRejectedValue(notFound());
 
-      await expect(repo.update({ id: SCHEDULE_ID, data: {} as never })).resolves.toBeUndefined();
+      await expect(repo.update({ id: SCHEDULE_ID, data: {} as never })).resolves.toBeNull();
+    });
+
+    it('rethrows unexpected errors', async () => {
+      prisma.schedule.update.mockRejectedValue(new Error('boom'));
+
+      await expect(repo.update({ id: SCHEDULE_ID, data: {} as never })).rejects.toThrow('boom');
     });
   });
 
   describe('del', () => {
     it('returns true when a row was deleted', async () => {
-      db.queue([{ id: SCHEDULE_ID }]);
+      prisma.schedule.deleteMany.mockResolvedValue({ count: 1 });
 
       await expect(repo.del({ id: SCHEDULE_ID })).resolves.toBe(true);
-      expect(db.delete).toHaveBeenCalledWith(schedules);
+      expect(prisma.schedule.deleteMany).toHaveBeenCalledWith({ where: { id: SCHEDULE_ID } });
     });
 
     it('returns false when nothing was deleted', async () => {
-      db.queue([]);
+      prisma.schedule.deleteMany.mockResolvedValue({ count: 0 });
 
       await expect(repo.del({ id: SCHEDULE_ID })).resolves.toBe(false);
-    });
-  });
-
-  describe('getAll count fallback', () => {
-    it('reports a zero total when the count query returns no row', async () => {
-      db.queue([], []);
-
-      const result = await repo.getAll({ userId: USER_ID, query: {} as never });
-
-      expect(result.pagination.total).toBe(0);
     });
   });
 });

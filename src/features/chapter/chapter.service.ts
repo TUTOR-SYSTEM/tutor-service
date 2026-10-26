@@ -1,9 +1,7 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { ERROR_MESSAGES } from 'src/data/constants';
 import { ChapterRepository } from './chapter.repository';
 import { CurriculumRepository } from '../curriculum/curriculum.repository';
-import { DRIZZLE } from 'src/database/database.module';
-import { drizzle } from 'drizzle-orm/postgres-js';
 import {
   type CreateChapterDto,
   type UpdateChapterDto,
@@ -16,7 +14,6 @@ export class ChapterService {
   constructor(
     private readonly chapterRepository: ChapterRepository,
     private readonly curriculumRepository: CurriculumRepository,
-    @Inject(DRIZZLE) private readonly db: ReturnType<typeof drizzle>,
   ) {}
 
   /** Writes are limited to the curriculum's owner; anyone else gets a 404. */

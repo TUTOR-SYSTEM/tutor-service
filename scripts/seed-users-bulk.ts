@@ -7,31 +7,9 @@
  *   SEED_EMAIL_DOMAIN=example.test (default example.test) → user001@example.test
  */
 import 'dotenv/config';
-import { randomBytes, randomUUID } from 'node:crypto';
-import { inArray, or } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/postgres-js';
-import postgres from 'postgres';
-import * as schema from '../src/database/schema';
-import { users } from '../src/database/schema';
+import { randomBytes } from 'node:crypto';
+import { createPrisma } from './lib/prisma';
 import { hashData } from '../src/packages/helpers/hashingData.helper';
-
-function resolveDatabaseUrl(): string {
-  const databaseUrl = process.env.DATABASE_URL?.trim();
-  if (databaseUrl) {
-    return databaseUrl;
-  }
-
-  const host = process.env.POSTGRES_HOST?.trim() || 'localhost';
-  const port = process.env.POSTGRES_PORT?.trim() || '5433';
-  const db = process.env.POSTGRES_DB?.trim() || 'backends_db';
-  const user = process.env.POSTGRES_USER?.trim() || 'postgres';
-  const password = process.env.POSTGRES_PASSWORD?.trim() || 'postgres';
-
-  const url = new URL(`postgres://${host}:${port}/${db}`);
-  url.username = user;
-  url.password = password;
-  return url.toString();
-}
 
 function generateUserCode(): string {
   return randomBytes(3).toString('hex').slice(0, 6).toUpperCase();
@@ -51,9 +29,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const url = resolveDatabaseUrl();
-  const client = postgres(url);
-  const db = drizzle(client, { schema });
+  const prisma = createPrisma();
 
   const width = String(count).length;
   const emails: string[] = [];
@@ -64,10 +40,10 @@ async function main(): Promise<void> {
     usernames.push(`seeduser${suffix}`);
   }
 
-  const existingRows = await db
-    .select({ email: users.email, username: users.username })
-    .from(users)
-    .where(or(inArray(users.email, emails), inArray(users.username, usernames)));
+  const existingRows = await prisma.user.findMany({
+    where: { OR: [{ email: { in: emails } }, { username: { in: usernames } }] },
+    select: { email: true, username: true },
+  });
 
   const existingEmails = new Set(existingRows.map((r) => r.email.toLowerCase()));
   const existingUsernames = new Set(existingRows.map((r) => r.username.toLowerCase()));
@@ -86,7 +62,7 @@ async function main(): Promise<void> {
 
   if (toCreate.length === 0) {
     console.log(`All ${count} slot(s) already used (email or username); nothing to insert.`);
-    await client.end({ timeout: 5 });
+    await prisma.$disconnect();
     return;
   }
 
@@ -95,8 +71,8 @@ async function main(): Promise<void> {
   const lastName = 'User';
 
   for (const row of toCreate) {
-    await db.insert(users).values({
-      id: randomUUID(),
+    await prisma.user.create({
+      data: {
       userCode: generateUserCode(),
       email: row.email,
       username: row.username,
@@ -105,6 +81,7 @@ async function main(): Promise<void> {
       password: hashedPassword,
       isActive: true,
       role: 'STUDENT',
+      },
     });
   }
 
@@ -112,7 +89,7 @@ async function main(): Promise<void> {
   console.log(`Inserted ${toCreate.length} user(s); skipped ${skipped} (email or username already taken).`);
   console.log(`Email pattern: seeduser${padIndex(1, width)}@${domain} … seeduser${padIndex(count, width)}@${domain}`);
   console.log('Shared password: (value of SEED_PASSWORD env or default Test@12345)');
-  await client.end({ timeout: 5 });
+  await prisma.$disconnect();
 }
 
 main().catch((err: unknown) => {

@@ -56,10 +56,10 @@ export class ClassService {
     }
   }
 
-  // postgres unique_violation (drizzle may wrap the driver error in `cause`)
+  // unique violation: Prisma P2002 (raw driver errors may still carry SQLSTATE 23505)
   private isUniqueViolation(err: unknown): boolean {
     const e = err as { code?: string; cause?: { code?: string } };
-    return e?.code === '23505' || e?.cause?.code === '23505';
+    return ['P2002', '23505'].includes(e?.code ?? '') || e?.cause?.code === '23505';
   }
 
   async createClassService({ userId, data }: { userId: string; data: CreateClassDto }) {

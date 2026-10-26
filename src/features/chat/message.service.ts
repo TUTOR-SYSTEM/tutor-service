@@ -1,145 +1,98 @@
-import { Inject, Injectable, ForbiddenException } from '@nestjs/common';
-import { DRIZZLE } from '../../database/database.module';
-import { type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import { eq, and, desc, sql } from 'drizzle-orm';
-import { messages, conversationParticipants, conversations } from 'src/database/schema';
+import { Injectable, ForbiddenException } from '@nestjs/common';
+import { PrismaService, isRecordNotFound } from '../../database/prisma.service';
 
 @Injectable()
 export class MessageService {
-  constructor(@Inject(DRIZZLE) private readonly db: PostgresJsDatabase<Record<string, never>>) {}
+  constructor(private readonly prisma: PrismaService) {}
 
-  async getMessages(conversationId: string, userId: string, limit = 50, before?: string) {
-    const participant = await this.db
-      .select()
-      .from(conversationParticipants)
-      .where(
-        and(
-          eq(conversationParticipants.conversationId, conversationId),
-          eq(conversationParticipants.userId, userId),
-        ),
-      )
-      .limit(1);
+  private async assertParticipant(conversationId: string, userId: string) {
+    const participant = await this.prisma.conversationParticipant.findUnique({
+      where: { conversationId_userId: { conversationId, userId } },
+      select: { id: true },
+    });
 
-    if (participant.length === 0) {
+    if (!participant) {
       throw new ForbiddenException('You are not a participant of this conversation');
     }
+  }
 
-    const conditions = [eq(messages.conversationId, conversationId)];
+  async getMessages(conversationId: string, userId: string, limit = 50, before?: string) {
+    await this.assertParticipant(conversationId, userId);
 
-    if (before) {
-      const beforeMsg = await this.db
-        .select({ createdAt: messages.createdAt })
-        .from(messages)
-        .where(eq(messages.id, before))
-        .limit(1);
+    const beforeMsg = before
+      ? await this.prisma.message.findUnique({
+          where: { id: before },
+          select: { createdAt: true },
+        })
+      : null;
 
-      if (beforeMsg.length > 0) {
-        conditions.push(sql`${messages.createdAt} < ${beforeMsg[0].createdAt}`);
-      }
-    }
-
-    const result = await this.db
-      .select({
-        id: messages.id,
-        conversationId: messages.conversationId,
-        senderId: messages.senderId,
-        content: messages.content,
-        status: messages.status,
-        createdAt: messages.createdAt,
-      })
-      .from(messages)
-      .where(and(...conditions))
-      .orderBy(desc(messages.createdAt))
-      .limit(limit);
+    const result = await this.prisma.message.findMany({
+      where: {
+        conversationId,
+        ...(beforeMsg && { createdAt: { lt: beforeMsg.createdAt } }),
+      },
+      select: {
+        id: true,
+        conversationId: true,
+        senderId: true,
+        content: true,
+        status: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
 
     return result.reverse();
   }
 
   async createMessage(conversationId: string, senderId: string, content: string) {
-    const participant = await this.db
-      .select()
-      .from(conversationParticipants)
-      .where(
-        and(
-          eq(conversationParticipants.conversationId, conversationId),
-          eq(conversationParticipants.userId, senderId),
-        ),
-      )
-      .limit(1);
+    await this.assertParticipant(conversationId, senderId);
 
-    if (participant.length === 0) {
-      throw new ForbiddenException('You are not a participant of this conversation');
-    }
+    const newMessage = await this.prisma.message.create({
+      data: { conversationId, senderId, content, status: 'SENT' },
+    });
 
-    const [newMessage] = await this.db
-      .insert(messages)
-      .values({
-        conversationId,
-        senderId,
-        content,
-        status: 'SENT',
-      })
-      .returning();
-
-    await this.db
-      .update(conversations)
-      .set({ lastMessageAt: new Date() })
-      .where(eq(conversations.id, conversationId));
+    await this.prisma.conversation.update({
+      where: { id: conversationId },
+      data: { lastMessageAt: new Date() },
+    });
 
     return newMessage;
   }
 
   async updateMessageStatus(messageId: string, status: 'DELIVERED' | 'READ') {
-    const [updated] = await this.db
-      .update(messages)
-      .set({ status })
-      .where(eq(messages.id, messageId))
-      .returning();
-
-    return updated;
+    try {
+      return await this.prisma.message.update({ where: { id: messageId }, data: { status } });
+    } catch (error) {
+      if (isRecordNotFound(error)) return undefined;
+      throw error;
+    }
   }
 
   async markConversationAsRead(conversationId: string, userId: string) {
-    await this.db
-      .update(conversationParticipants)
-      .set({ lastReadAt: new Date() })
-      .where(
-        and(
-          eq(conversationParticipants.conversationId, conversationId),
-          eq(conversationParticipants.userId, userId),
-        ),
-      );
+    await this.prisma.conversationParticipant.updateMany({
+      where: { conversationId, userId },
+      data: { lastReadAt: new Date() },
+    });
 
-    await this.db
-      .update(messages)
-      .set({ status: 'READ' })
-      .where(
-        and(
-          eq(messages.conversationId, conversationId),
-          sql`${messages.senderId} != ${userId}`,
-          sql`${messages.status} != 'READ'`,
-        ),
-      );
+    await this.prisma.message.updateMany({
+      where: { conversationId, senderId: { not: userId }, status: { not: 'READ' } },
+      data: { status: 'READ' },
+    });
   }
 
   async getUnreadCounts(userId: string) {
     // one grouped query across all of the user's conversations (was 1+N)
-    const rows = await this.db
-      .select({
-        conversationId: conversationParticipants.conversationId,
-        count: sql<number>`count(${messages.id})::int`,
-      })
-      .from(conversationParticipants)
-      .leftJoin(
-        messages,
-        and(
-          eq(messages.conversationId, conversationParticipants.conversationId),
-          sql`${messages.senderId} != ${userId}`,
-          sql`(${conversationParticipants.lastReadAt} is null or ${messages.createdAt} > ${conversationParticipants.lastReadAt})`,
-        ),
-      )
-      .where(eq(conversationParticipants.userId, userId))
-      .groupBy(conversationParticipants.conversationId);
+    const rows = await this.prisma.$queryRaw<{ conversationId: string; count: number }[]>`
+      SELECT cp.conversation_id AS "conversationId", count(m.id)::int AS count
+      FROM conversation_participants cp
+      LEFT JOIN messages m
+        ON m.conversation_id = cp.conversation_id
+       AND m.sender_id != ${userId}::uuid
+       AND (cp.last_read_at IS NULL OR m.created_at > cp.last_read_at)
+      WHERE cp.user_id = ${userId}::uuid
+      GROUP BY cp.conversation_id`;
 
     const result: Record<string, number> = {};
     for (const r of rows) result[r.conversationId] = Number(r.count);

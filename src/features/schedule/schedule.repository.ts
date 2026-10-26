@@ -1,36 +1,29 @@
-import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, count, eq, inArray, or } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/postgres-js';
-import { DRIZZLE } from '../../database/database.module';
+import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import { PrismaService, isRecordNotFound } from '../../database/prisma.service';
 import {
   CreateScheduleDto,
   CreateSchedulesDto,
   GetSchedulesQueryDto,
   UpdateScheduleDto,
 } from '@packages/entities/schedule';
-import { classStudents, classes, schedules } from 'src/database/schema';
-import { buildListWhereClause } from '@packages/helpers';
+import { buildListWhereClause, buildPagination } from '@packages/helpers';
 
 @Injectable()
 export class ScheduleRepository {
-  constructor(
-    @Inject(DRIZZLE)
-    private readonly db: ReturnType<typeof drizzle>,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async create({ data }: { data: CreateScheduleDto }) {
-    const [schedule] = await this.db
-      .insert(schedules)
-      .values({
+    return this.prisma.schedule.create({
+      data: {
         classId: data.classId,
         dayOfWeek: data.dayOfWeek,
         startTime: data.startTime,
         endTime: data.endTime,
         format: data.format,
         location: data.location,
-      })
-      .returning();
-    return schedule;
+      },
+    });
   }
 
   async createMany({
@@ -40,116 +33,83 @@ export class ScheduleRepository {
     classId: string;
     items: CreateSchedulesDto['schedules'];
   }) {
-    const rows = await this.db
-      .insert(schedules)
-      .values(
-        items.map((item) => ({
-          classId,
-          dayOfWeek: item.dayOfWeek,
-          startTime: item.startTime,
-          endTime: item.endTime,
-          format: item.format,
-          location: item.location,
-        })),
-      )
-      .returning();
-    return rows;
+    return this.prisma.schedule.createManyAndReturn({
+      data: items.map((item) => ({
+        classId,
+        dayOfWeek: item.dayOfWeek,
+        startTime: item.startTime,
+        endTime: item.endTime,
+        format: item.format,
+        location: item.location,
+      })),
+    });
   }
 
   // list every schedule across the classes the user owns (tutor) or is enrolled in (student)
   async getAll({ userId, query }: { userId: string; query: GetSchedulesQueryDto }) {
     const { page = 1, limit = 10, search, classId } = query;
 
-    const ownedClassIds = this.db
-      .select({ id: classes.id })
-      .from(classes)
-      .where(eq(classes.tutorId, userId));
-
-    const enrolledClassIds = this.db
-      .select({ id: classStudents.classId })
-      .from(classStudents)
-      .where(eq(classStudents.studentId, userId));
-
     const searchWhere = buildListWhereClause({
       search,
-      searchableColumns: { location: { column: schedules.location } },
+      searchFields: ['location'],
       filters: { classId },
-      filterColumns: {
-        classId: { column: schedules.classId },
-      },
-    });
+    }) as Prisma.ScheduleWhereInput | undefined;
 
-    const accessWhere = or(
-      inArray(schedules.classId, ownedClassIds),
-      inArray(schedules.classId, enrolledClassIds),
-    );
-    const whereClause = and(...[searchWhere, accessWhere].filter((c) => c !== undefined));
+    const accessWhere: Prisma.ScheduleWhereInput = {
+      class: { OR: [{ tutorId: userId }, { students: { some: { studentId: userId } } }] },
+    };
+    const where: Prisma.ScheduleWhereInput = {
+      AND: [accessWhere, ...(searchWhere ? [searchWhere] : [])],
+    };
 
-    const [totalRow] = await this.db.select({ total: count() }).from(schedules).where(whereClause);
-    const total = Number(totalRow?.total ?? 0);
     const pageNumber = Number(page);
     const limitNumber = Number(limit);
-    const offset = (pageNumber - 1) * limitNumber;
 
-    const rows = await this.db
-      .select({
-        schedule: schedules,
-        class: {
-          id: classes.id,
-          name: classes.name,
-          code: classes.code,
-          subject: classes.subject,
-        },
-      })
-      .from(schedules)
-      .leftJoin(classes, eq(schedules.classId, classes.id))
-      .where(whereClause)
-      .orderBy(asc(schedules.dayOfWeek), asc(schedules.startTime))
-      .limit(limitNumber)
-      .offset(offset);
+    const [total, rows] = await Promise.all([
+      this.prisma.schedule.count({ where }),
+      this.prisma.schedule.findMany({
+        where,
+        include: { class: { select: { id: true, name: true, code: true, subject: true } } },
+        orderBy: [{ dayOfWeek: 'asc' }, { startTime: 'asc' }],
+        take: limitNumber,
+        skip: (pageNumber - 1) * limitNumber,
+      }),
+    ]);
 
-    return {
-      schedules: rows.map((row) => ({ ...row.schedule, class: row.class })),
-      pagination: {
-        total,
-        page: pageNumber,
-        limit: limitNumber,
-        totalPages: Math.ceil(total / limitNumber),
-      },
-    };
+    return { schedules: rows, pagination: buildPagination(total, pageNumber, limitNumber) };
   }
 
   async getByClass({ classId }: { classId: string }) {
-    return this.db
-      .select()
-      .from(schedules)
-      .where(eq(schedules.classId, classId))
-      .orderBy(asc(schedules.dayOfWeek), asc(schedules.startTime));
+    return this.prisma.schedule.findMany({
+      where: { classId },
+      orderBy: [{ dayOfWeek: 'asc' }, { startTime: 'asc' }],
+    });
   }
 
   async getById({ id }: { id: string }) {
-    const [schedule] = await this.db.select().from(schedules).where(eq(schedules.id, id)).limit(1);
-    return schedule;
+    return this.prisma.schedule.findUnique({ where: { id } });
   }
 
   async update({ id, data }: { id: string; data: UpdateScheduleDto }) {
-    const [schedule] = await this.db
-      .update(schedules)
-      .set({
-        dayOfWeek: data.dayOfWeek,
-        startTime: data.startTime,
-        endTime: data.endTime,
-        format: data.format,
-        location: data.location,
-        updatedAt: new Date(),
-      })
-      .where(eq(schedules.id, id))
-      .returning();
-    return schedule;
+    try {
+      return await this.prisma.schedule.update({
+        where: { id },
+        data: {
+          dayOfWeek: data.dayOfWeek,
+          startTime: data.startTime,
+          endTime: data.endTime,
+          format: data.format,
+          location: data.location,
+        },
+      });
+    } catch (error) {
+      if (isRecordNotFound(error)) return null;
+      throw error;
+    }
   }
 
   async del({ id }: { id: string }) {
-    const [schedule] = await this.db.delete(schedules).where(eq(schedules.id, id)).returning();
-    return !!schedule;
+    const { count } = await this.prisma.schedule.deleteMany({ where: { id } });
+    return count > 0;
   }
 }
