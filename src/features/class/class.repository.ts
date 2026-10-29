@@ -139,7 +139,8 @@ export class ClassRepository {
         .innerJoin(users, eq(users.id, classStudents.studentId))
         .where(eq(users.parentId, userId));
       scopeWhere = inArray(classes.id, childClassIds);
-    } else {
+    } else if (role !== 'ADMIN') {
+      // tutors list the classes they own; ADMIN sees every class (no scope)
       scopeWhere = eq(classes.tutorId, userId);
     }
 

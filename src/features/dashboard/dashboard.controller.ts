@@ -25,6 +25,6 @@ export class DashboardController {
   })
   @SwaggerResponse({ status: 200, description: 'Dashboard overview fetched' })
   async overview(@CurrentUser() user: JwtGuardUser) {
-    return this.dashboardService.getOverview(user.id);
+    return this.dashboardService.getOverview(user.id, user.role);
   }
 }

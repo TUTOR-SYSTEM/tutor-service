@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, count, desc, eq, inArray, or } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, ne, or, type SQL } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { DRIZZLE } from '../../database/database.module';
 import type {
@@ -76,12 +76,24 @@ export class ExerciseRepository {
 
   // list exercises the acting user can reach (as the tutor or the student on the row),
   // narrowed by the optional query filters.
-  async findAll({ userId, query }: { userId: string; query: getExerciseDto }) {
+  async findAll({
+    userId,
+    role,
+    query,
+  }: {
+    userId: string;
+    role?: string | null;
+    query: getExerciseDto;
+  }) {
     const { page, limit, sessionId, studentId, classId, tutorId } = query;
 
-    const accessWhere = or(eq(exercise.tutorId, userId), eq(exercise.studentId, userId));
+    // ADMIN lists every exercise; everyone else only the ones they are a party to
+    const accessWhere =
+      role === 'ADMIN'
+        ? undefined
+        : or(eq(exercise.tutorId, userId), eq(exercise.studentId, userId));
 
-    const conditions = [accessWhere];
+    const conditions: (SQL | undefined)[] = [accessWhere];
     if (sessionId) conditions.push(eq(exercise.sessionId, sessionId));
     if (studentId) conditions.push(eq(exercise.studentId, studentId));
     if (tutorId) conditions.push(eq(exercise.tutorId, tutorId));
@@ -147,9 +159,12 @@ export class ExerciseRepository {
     };
   }
 
+  // `notStatus` makes the write conditional (e.g. never overwrite a GRADED row): the check and
+  // the write are one statement, so a concurrent grade cannot be clobbered by a resubmit.
   async update({
     id,
     data,
+    notStatus,
   }: {
     id: string;
     data: Partial<{
@@ -159,11 +174,14 @@ export class ExerciseRepository {
       comment: string | null;
       gradedAt: Date | null;
     }>;
+    notStatus?: ExerciseRow['status'];
   }): Promise<ExerciseDetailDto | null> {
     const [row] = await this.db
       .update(exercise)
       .set({ ...data, updatedAt: new Date() })
-      .where(eq(exercise.id, id))
+      .where(
+        notStatus ? and(eq(exercise.id, id), ne(exercise.status, notStatus)) : eq(exercise.id, id),
+      )
       .returning();
     return row ? this.map(row) : null;
   }

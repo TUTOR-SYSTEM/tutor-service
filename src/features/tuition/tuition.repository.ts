@@ -33,8 +33,9 @@ export class TuitionRepository {
     return this.db.select({ id: classes.id }).from(classes).where(eq(classes.tutorId, userId));
   }
 
-  /** A user may read a tuition if they are its student or the tutor of its class. */
-  private canRead(userId: string) {
+  /** A user may read a tuition if they are its student or the tutor of its class; ADMIN reads all. */
+  private canRead(userId: string, role?: string | null): SQL | undefined {
+    if (role === 'ADMIN') return undefined;
     return or(
       eq(tuitions.studentId, userId),
       inArray(tuitions.classId, this.ownedClassIds(userId)),
@@ -82,9 +83,17 @@ export class TuitionRepository {
     return this.findById(tuition.id);
   }
 
-  async findAll({ userId, query }: { userId: string; query: GetTuitionsQueryDto }) {
+  async findAll({
+    userId,
+    role,
+    query,
+  }: {
+    userId: string;
+    role?: string | null;
+    query: GetTuitionsQueryDto;
+  }) {
     const { page, limit, classId, studentId, status } = query;
-    const conditions: (SQL | undefined)[] = [this.canRead(userId)];
+    const conditions: (SQL | undefined)[] = [this.canRead(userId, role)];
 
     if (classId) conditions.push(eq(tuitions.classId, classId));
     if (studentId) conditions.push(eq(tuitions.studentId, studentId));
@@ -113,13 +122,13 @@ export class TuitionRepository {
   }
 
   /** When `userId` is given the row is only returned if that user may read it. */
-  async findById(id: string, userId?: string) {
+  async findById(id: string, userId?: string, role?: string | null) {
     const [row] = await this.db
       .select(this.joinedColumns)
       .from(tuitions)
       .innerJoin(classes, eq(tuitions.classId, classes.id))
       .innerJoin(users, eq(tuitions.studentId, users.id))
-      .where(and(eq(tuitions.id, id), userId ? this.canRead(userId) : undefined))
+      .where(and(eq(tuitions.id, id), userId ? this.canRead(userId, role) : undefined))
       .limit(1);
     return row ? this.serialize(row) : null;
   }
@@ -181,9 +190,17 @@ export class TuitionRepository {
   }
 
   /** Revenue summary over the classes the tutor owns (optionally narrowed to one class). */
-  async getSummary({ userId, classId }: { userId: string; classId?: string }) {
+  async getSummary({
+    userId,
+    role,
+    classId,
+  }: {
+    userId: string;
+    role?: string | null;
+    classId?: string;
+  }) {
     const where = and(
-      inArray(tuitions.classId, this.ownedClassIds(userId)),
+      role === 'ADMIN' ? undefined : inArray(tuitions.classId, this.ownedClassIds(userId)),
       classId ? eq(tuitions.classId, classId) : undefined,
     );
 

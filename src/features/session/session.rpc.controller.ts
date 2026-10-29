@@ -18,37 +18,39 @@ export class SessionRpcController {
   constructor(private readonly sessionService: SessionService) {}
 
   @MessagePattern('session.create')
-  create(@Payload() payload: { userId: string; data: CreateSessionDto }) {
+  create(@Payload() payload: { userId: string; role?: string; data: CreateSessionDto }) {
     return this.sessionService.createSessionService(payload);
   }
 
   @MessagePattern('session.createBulk')
-  createBulk(@Payload() payload: { userId: string; data: CreateSessionsDto }) {
+  createBulk(@Payload() payload: { userId: string; role?: string; data: CreateSessionsDto }) {
     return this.sessionService.createSessionsService(payload);
   }
 
   @MessagePattern('session.getAll')
-  getAll(@Payload() payload: { userId: string; query: GetSessionsQueryDto }) {
+  getAll(@Payload() payload: { userId: string; role?: string; query: GetSessionsQueryDto }) {
     return this.sessionService.getSessionsService(payload);
   }
 
   @MessagePattern('session.getByClass')
-  getByClass(@Payload() payload: { userId: string; classId: string }) {
+  getByClass(@Payload() payload: { userId: string; role?: string; classId: string }) {
     return this.sessionService.getSessionsByClassService(payload);
   }
 
   @MessagePattern('session.getById')
-  getById(@Payload() payload: { userId: string; id: string }) {
+  getById(@Payload() payload: { userId: string; role?: string; id: string }) {
     return this.sessionService.getSessionService(payload);
   }
 
   @MessagePattern('session.update')
-  update(@Payload() payload: { userId: string; id: string; data: UpdateSessionDto }) {
+  update(
+    @Payload() payload: { userId: string; role?: string; id: string; data: UpdateSessionDto },
+  ) {
     return this.sessionService.updateSessionService(payload);
   }
 
   @MessagePattern('session.delete')
-  del(@Payload() payload: { userId: string; id: string }) {
+  del(@Payload() payload: { userId: string; role?: string; id: string }) {
     return this.sessionService.delSessionService(payload);
   }
 }

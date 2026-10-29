@@ -26,15 +26,7 @@ export const DATABASE_ENVS = [
       useFactory: async (configService: ConfigService) => {
         const logger = new Logger(DatabaseModule.name);
 
-        // Nếu không dùng DATABASE_URL thì validate từng biến
-        const databaseUrl = configService.get<string>('DATABASE_URL')?.trim();
-
-        if (!databaseUrl) {
-          validateRequiredEnvs(configService, DATABASE_ENVS);
-        }
-
         const connectionString =
-          databaseUrl ||
           (() => {
             const url = new URL(
               `postgres://${configService.getOrThrow(
@@ -49,6 +41,8 @@ export const DATABASE_ENVS = [
 
             return url.toString();
           })();
+
+          logger.log('database uri : ', connectionString)
 
         const client = postgres(connectionString);
 

@@ -12,7 +12,7 @@ export class DashboardRpcController {
   constructor(private readonly dashboardService: DashboardService) {}
 
   @MessagePattern('dashboard.overview')
-  overview(@Payload() payload: { userId: string }) {
-    return this.dashboardService.getOverview(payload.userId);
+  overview(@Payload() payload: { userId: string; role?: string | null }) {
+    return this.dashboardService.getOverview(payload.userId, payload.role);
   }
 }

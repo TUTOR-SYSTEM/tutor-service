@@ -57,7 +57,15 @@ export class ScheduleRepository {
   }
 
   // list every schedule across the classes the user owns (tutor) or is enrolled in (student)
-  async getAll({ userId, query }: { userId: string; query: GetSchedulesQueryDto }) {
+  async getAll({
+    userId,
+    role,
+    query,
+  }: {
+    userId: string;
+    role?: string | null;
+    query: GetSchedulesQueryDto;
+  }) {
     const { page = 1, limit = 10, search, classId } = query;
 
     const ownedClassIds = this.db
@@ -79,10 +87,14 @@ export class ScheduleRepository {
       },
     });
 
-    const accessWhere = or(
-      inArray(schedules.classId, ownedClassIds),
-      inArray(schedules.classId, enrolledClassIds),
-    );
+    // ADMIN sees every schedule; everyone else sees owned or enrolled classes only
+    const accessWhere =
+      role === 'ADMIN'
+        ? undefined
+        : or(
+            inArray(schedules.classId, ownedClassIds),
+            inArray(schedules.classId, enrolledClassIds),
+          );
     const whereClause = and(...[searchWhere, accessWhere].filter((c) => c !== undefined));
 
     const [totalRow] = await this.db.select({ total: count() }).from(schedules).where(whereClause);

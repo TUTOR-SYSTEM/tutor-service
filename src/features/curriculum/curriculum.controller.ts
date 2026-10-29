@@ -29,6 +29,7 @@ import {
 } from '@packages/entities';
 import { CurriculumService } from './curriculum.service';
 import { ZodValidationPipe } from '@packages/pipes';
+import { ParseUUIDPipe } from '@nestjs/common';
 
 @ApiTags('Curriculum')
 @ApiBearerAuth('access-token')
@@ -57,7 +58,7 @@ export class CurriculumController {
   @ApiBody({
     schema: {
       type: 'object',
-      required: ['subject', 'code', 'grade'],
+      required: ['subject', 'code', 'grade', 'courseTime'],
       properties: {
         subject: { type: 'string', example: 'Đại Số' },
         code: { type: 'string', example: 'FDV643' },
@@ -74,6 +75,7 @@ export class CurriculumController {
   ) {
     return await this.curriculumService.createCurriculumService({
       userId: user.id,
+      role: user.role,
       createCurriculum,
     });
   }
@@ -101,7 +103,11 @@ export class CurriculumController {
     @CurrentUser() user: Record<string, string>,
   ) {
     this.logger.log('userid', user.id);
-    return await this.curriculumService.getAllCurriculumService({ userId: user.id, query });
+    return await this.curriculumService.getAllCurriculumService({
+      userId: user.id,
+      role: user.role,
+      query,
+    });
   }
 
   @Get(':id')
@@ -114,10 +120,14 @@ export class CurriculumController {
   @SwaggerResponse({ status: StatusCodes.OK, description: 'Get curriculum by id ...' })
   @ApiResponse({ statusCode: StatusCodes.OK, message: 'Get curriculum by id ...' })
   async getCurriculumByIdController(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: Record<string, string>,
   ) {
-    return await this.curriculumService.getCurriculumByIdService({ userId: user.id, id });
+    return await this.curriculumService.getCurriculumByIdService({
+      userId: user.id,
+      role: user.role,
+      id,
+    });
   }
 
   @Put(':id')
@@ -141,12 +151,13 @@ export class CurriculumController {
   @SwaggerResponse({ status: StatusCodes.OK, description: 'Update curriculum ...' })
   @ApiResponse({ statusCode: StatusCodes.OK, message: 'Update curriculum ...' })
   async updateCurriculumController(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() updateData: CreateCurriculumDto,
     @CurrentUser() user: Record<string, string>,
   ) {
     return await this.curriculumService.updateCurriculumService({
       userId: user?.id,
+      role: user?.role,
       id,
       data: updateData,
     });
@@ -162,9 +173,13 @@ export class CurriculumController {
   @SwaggerResponse({ status: StatusCodes.OK, description: 'Delete curriculum ...' })
   @ApiResponse({ statusCode: StatusCodes.OK, message: 'Delete curriculum ...' })
   async deleteCurriculumController(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: Record<string, string>,
   ) {
-    return await this.curriculumService.deleteCurriculumService({ userId: user.id, id });
+    return await this.curriculumService.deleteCurriculumService({
+      userId: user.id,
+      role: user.role,
+      id,
+    });
   }
 }

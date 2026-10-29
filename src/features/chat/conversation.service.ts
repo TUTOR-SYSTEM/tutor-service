@@ -1,5 +1,6 @@
 import { Inject, Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { DRIZZLE } from '../../database/database.module';
+import { ERROR_MESSAGES } from 'src/data/constants';
 import { type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { eq, and, desc, inArray, sql } from 'drizzle-orm';
 import {
@@ -171,8 +172,29 @@ export class ConversationService {
     return this.getConversationById(newConv.id, userId);
   }
 
+  // every member the creator adds must be a user the creator may chat with (same policy as DM)
+  private async assertCanChatWithAll(userId: string, targetIds: string[]) {
+    if (targetIds.length === 0) return;
+    const rows = await this.db
+      .select({ id: users.id, role: users.role })
+      .from(users)
+      .where(inArray(users.id, [userId, ...targetIds]));
+    const roleById = new Map(rows.map((r) => [r.id, r.role ?? 'STUDENT']));
+    const actorRole = roleById.get(userId);
+    if (!actorRole) throw new NotFoundException('Current user not found');
+    for (const targetId of targetIds) {
+      const targetRole = roleById.get(targetId);
+      if (!targetRole) throw new NotFoundException('Target user not found');
+      await this.validateChatPermission(actorRole, targetRole, userId, targetId);
+    }
+  }
+
   async createGroupConversation(userId: string, name: string, participantIds: string[]) {
     const allIds = [userId, ...participantIds.filter((id) => id !== userId)];
+    await this.assertCanChatWithAll(
+      userId,
+      allIds.filter((id) => id !== userId),
+    );
 
     const [newConv] = await this.db
       .insert(conversations)
@@ -249,6 +271,16 @@ export class ConversationService {
       throw new ForbiddenException('You are not a participant of this conversation');
     }
 
+    // DM membership is fixed to its two people; only group/class chats take new members
+    const [conv] = await this.db
+      .select({ type: conversations.type })
+      .from(conversations)
+      .where(eq(conversations.id, conversationId))
+      .limit(1);
+    if (conv?.type === 'DIRECT') {
+      throw new ForbiddenException(ERROR_MESSAGES.CHAT_DIRECT_NO_ADD_PARTICIPANT);
+    }
+
     const existing = await this.db
       .select()
       .from(conversationParticipants)
@@ -263,6 +295,9 @@ export class ConversationService {
     if (existing.length > 0) {
       return { message: 'User is already a participant' };
     }
+
+    // the caller may only add someone they are allowed to chat with
+    await this.assertCanChatWithAll(userId, [newUserId]);
 
     await this.db.insert(conversationParticipants).values({
       conversationId,

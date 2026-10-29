@@ -7,6 +7,9 @@ import {
   type TodayScheduleRow,
 } from './dashboard.repository';
 import { UserService } from '../user/user.service';
+import { RmqProducer } from '../rabbitmq/rmq.producer';
+
+export type RecentNotification = Record<string, unknown>;
 
 export interface DashboardOverview {
   role: string;
@@ -24,6 +27,7 @@ export interface DashboardOverview {
   todaySchedule: TodayScheduleRow[];
   upcomingSchedule: TodayScheduleRow[];
   monthly: MonthlyRow[];
+  recentNotifications: RecentNotification[];
 }
 
 @Injectable()
@@ -31,7 +35,21 @@ export class DashboardService {
   constructor(
     private readonly repo: DashboardRepository,
     private readonly userService: UserService,
+    private readonly rmqProducer: RmqProducer,
   ) {}
+
+  // best-effort: the overview still renders when third-service is down or slow
+  private async recentNotifications(userId: string): Promise<RecentNotification[]> {
+    try {
+      const res = await this.rmqProducer.send<
+        { data?: RecentNotification[] },
+        { userId: string; query: { page: number; limit: number } }
+      >('notification.getAll', { userId, query: { page: 1, limit: 5 } }, 5000, 0);
+      return Array.isArray(res?.data) ? res.data : [];
+    } catch {
+      return [];
+    }
+  }
 
   private startOfDay(d: Date) {
     const x = new Date(d);
@@ -53,14 +71,17 @@ export class DashboardService {
     return x;
   }
 
-  async getOverview(userId: string): Promise<DashboardOverview> {
+  // `role` is the JWT role the gateway forwards; the DB lookup only runs when a caller omits it
+  async getOverview(userId: string, requestedRole?: string | null): Promise<DashboardOverview> {
     if (!userId || !checkUuidValid({ data: userId }))
       throw new BadRequestException(ERROR_MESSAGES.USER_ID_MUST_BE_UUID);
 
-    const user = await this.userService.getUserRoleById(userId);
-    if (!user) throw new NotFoundException(ERROR_MESSAGES.USER_NOT_FOUND);
-
-    const role = user.role ?? 'STUDENT';
+    let role = requestedRole;
+    if (!role) {
+      const user = await this.userService.getUserRoleById(userId);
+      if (!user) throw new NotFoundException(ERROR_MESSAGES.USER_NOT_FOUND);
+      role = user.role ?? 'STUDENT';
+    }
     const isStudent = role === 'STUDENT';
 
     const scope = isStudent
@@ -89,6 +110,7 @@ export class DashboardService {
       monthlyStudents,
       monthlyClasses,
       tuition,
+      recentNotifications,
     ] = await Promise.all([
       this.repo.countClasses(scope),
       isStudent ? Promise.resolve(0) : this.repo.countStudents(scope),
@@ -105,6 +127,7 @@ export class DashboardService {
       this.repo.getNewStudentsByMonth(scope, year),
       this.repo.getNewClassesByMonth(scope, year),
       this.repo.getTuitionSums(scope, tuitionStudent),
+      this.recentNotifications(userId),
     ]);
 
     const { OVERDUE: overdue, UNPAID: unpaid } = tuition;
@@ -141,6 +164,7 @@ export class DashboardService {
       todaySchedule,
       upcomingSchedule,
       monthly,
+      recentNotifications,
     };
   }
 }

@@ -20,7 +20,7 @@ describe('ScheduleService', () => {
     update: jest.Mock;
     del: jest.Mock;
   };
-  let classService: { getOwnedClassService: jest.Mock };
+  let classService: { getOwnedClassService: jest.Mock; getAccessibleClassService: jest.Mock };
 
   beforeEach(async () => {
     repo = {
@@ -32,7 +32,10 @@ describe('ScheduleService', () => {
       update: jest.fn(),
       del: jest.fn(),
     };
-    classService = { getOwnedClassService: jest.fn().mockResolvedValue({ id: CLASS_ID }) };
+    classService = {
+      getOwnedClassService: jest.fn().mockResolvedValue({ id: CLASS_ID }),
+      getAccessibleClassService: jest.fn().mockResolvedValue({ classData: { id: CLASS_ID } }),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -149,7 +152,7 @@ describe('ScheduleService', () => {
     });
 
     it('does not read when ownership fails', async () => {
-      classService.getOwnedClassService.mockRejectedValue(new NotFoundException());
+      classService.getAccessibleClassService.mockRejectedValue(new NotFoundException());
 
       await expect(
         service.getSchedulesByClassService({ userId: USER_ID, classId: CLASS_ID }),
@@ -165,7 +168,7 @@ describe('ScheduleService', () => {
       const result = await service.getScheduleService({ userId: USER_ID, id: SCHEDULE_ID });
 
       expect(result).toEqual({ id: SCHEDULE_ID, classId: CLASS_ID });
-      expect(classService.getOwnedClassService).toHaveBeenCalledWith({
+      expect(classService.getAccessibleClassService).toHaveBeenCalledWith({
         userId: USER_ID,
         id: CLASS_ID,
       });
@@ -184,12 +187,12 @@ describe('ScheduleService', () => {
       await expect(
         service.getScheduleService({ userId: USER_ID, id: SCHEDULE_ID }),
       ).rejects.toThrow(new NotFoundException(ERROR_MESSAGES.SCHEDULE_NOT_FOUND));
-      expect(classService.getOwnedClassService).not.toHaveBeenCalled();
+      expect(classService.getAccessibleClassService).not.toHaveBeenCalled();
     });
 
     it('throws when the schedule belongs to a class the user does not own', async () => {
       repo.getById.mockResolvedValue({ id: SCHEDULE_ID, classId: CLASS_ID });
-      classService.getOwnedClassService.mockRejectedValue(new NotFoundException());
+      classService.getAccessibleClassService.mockRejectedValue(new NotFoundException());
 
       await expect(
         service.getScheduleService({ userId: USER_ID, id: SCHEDULE_ID }),
@@ -292,6 +295,64 @@ describe('ScheduleService', () => {
         service.getScheduleService({ userId: 'not-a-uuid', id: SCHEDULE_ID }),
       ).rejects.toThrow(new BadRequestException(ERROR_MESSAGES.USER_ID_MUST_BE_UUID));
       expect(repo.getById).not.toHaveBeenCalled();
+    });
+  });
+  describe('ADMIN and time-range rules', () => {
+    it('lets ADMIN write to any class (ownership is passed through with the role)', async () => {
+      repo.create.mockResolvedValue({ id: SCHEDULE_ID });
+
+      await service.createScheduleService({
+        userId: USER_ID,
+        role: 'ADMIN',
+        data: { classId: CLASS_ID, startTime: '08:00', endTime: '09:00' } as never,
+      });
+
+      expect(classService.getOwnedClassService).toHaveBeenCalledWith({
+        userId: USER_ID,
+        role: 'ADMIN',
+        id: CLASS_ID,
+      });
+    });
+
+    it('lets students and parents read through the accessible-class gate, not the owner gate', async () => {
+      repo.getById.mockResolvedValue({ id: SCHEDULE_ID, classId: CLASS_ID });
+
+      await service.getScheduleService({ userId: USER_ID, role: 'STUDENT', id: SCHEDULE_ID });
+
+      expect(classService.getAccessibleClassService).toHaveBeenCalledWith({
+        userId: USER_ID,
+        role: 'STUDENT',
+        id: CLASS_ID,
+      });
+      expect(classService.getOwnedClassService).not.toHaveBeenCalled();
+    });
+
+    it('rejects a schedule whose end is not after its start (no write)', async () => {
+      await expect(
+        service.createScheduleService({
+          userId: USER_ID,
+          data: { classId: CLASS_ID, startTime: '10:00', endTime: '09:00' } as never,
+        }),
+      ).rejects.toThrow(new BadRequestException(ERROR_MESSAGES.TIME_RANGE_INVALID));
+      expect(repo.create).not.toHaveBeenCalled();
+    });
+
+    it('checks a partial update against the stored end time', async () => {
+      repo.getById.mockResolvedValue({
+        id: SCHEDULE_ID,
+        classId: CLASS_ID,
+        startTime: '10:00',
+        endTime: '11:00',
+      });
+
+      await expect(
+        service.updateScheduleService({
+          userId: USER_ID,
+          id: SCHEDULE_ID,
+          data: { startTime: '11:30' } as never,
+        }),
+      ).rejects.toThrow(new BadRequestException(ERROR_MESSAGES.TIME_RANGE_INVALID));
+      expect(repo.update).not.toHaveBeenCalled();
     });
   });
 });

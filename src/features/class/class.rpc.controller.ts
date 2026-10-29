@@ -23,7 +23,7 @@ export class ClassRpcController {
   }
 
   @MessagePattern('class.update')
-  update(@Payload() payload: { userId: string; id: string; data: UpdateClassDto }) {
+  update(@Payload() payload: { userId: string; role?: string; id: string; data: UpdateClassDto }) {
     return this.classService.updateClassService(payload);
   }
 
@@ -34,37 +34,39 @@ export class ClassRpcController {
   }
 
   @MessagePattern('class.getAll')
-  getAll(@Payload() payload: { userId: string; query: GetClassesQueryDto }) {
+  getAll(@Payload() payload: { userId: string; role?: string; query: GetClassesQueryDto }) {
     return this.classService.getClassesService(payload);
   }
 
   @MessagePattern('class.getById')
-  getById(@Payload() payload: { userId: string; id: string }) {
+  getById(@Payload() payload: { userId: string; role?: string; id: string }) {
     return this.classService.getClassService(payload);
   }
 
   @MessagePattern('class.addStudents')
-  addStudents(@Payload() payload: { userId: string; classId: string; data: AddStudentsDto }) {
+  addStudents(
+    @Payload() payload: { userId: string; role?: string; classId: string; data: AddStudentsDto },
+  ) {
     return this.classService.addStudentsService(payload);
   }
 
   @MessagePattern('class.getStudents')
-  getStudents(@Payload() payload: { userId: string; id: string }) {
+  getStudents(@Payload() payload: { userId: string; role?: string; id: string }) {
     return this.classService.getAllStudentsService(payload);
   }
 
   @MessagePattern('class.getMaterials')
-  getMaterials(@Payload() payload: { userId: string; id: string }) {
+  getMaterials(@Payload() payload: { userId: string; role?: string; id: string }) {
     return this.classService.getClassMaterialsService(payload);
   }
 
   @MessagePattern('class.getWatch')
-  getWatch(@Payload() payload: { userId: string; id: string }) {
+  getWatch(@Payload() payload: { userId: string; role?: string; id: string }) {
     return this.classService.getClassWatchService(payload);
   }
 
   @MessagePattern('class.delete')
-  del(@Payload() payload: { userId: string; id: string }) {
+  del(@Payload() payload: { userId: string; role?: string; id: string }) {
     return this.classService.delClassService(payload);
   }
 }

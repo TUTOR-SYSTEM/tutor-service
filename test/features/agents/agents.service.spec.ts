@@ -59,7 +59,7 @@ describe('AgentsService', () => {
         data: { message: 'hello' } as never,
       });
 
-      expect(reply.content).toBe('Xin chào');
+      expect(reply).toBe('Xin chào');
     });
 
     it('falls back to assistant text blocks when there is no success result', async () => {
@@ -78,7 +78,7 @@ describe('AgentsService', () => {
         data: { message: 'hello' } as never,
       });
 
-      expect(reply.content).toBe('Một\nHai');
+      expect(reply).toBe('Một\nHai');
     });
 
     it('returns the default text when the agent produced nothing', async () => {
@@ -89,7 +89,7 @@ describe('AgentsService', () => {
         data: { message: 'hello' } as never,
       });
 
-      expect(reply.content).toBe('Không có phản hồi từ trợ lý.');
+      expect(reply).toBe('Không có phản hồi từ trợ lý.');
     });
   });
 });
