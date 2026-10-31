@@ -38,7 +38,7 @@ export class CurriculumController {
   private readonly logger = new Logger(CurriculumController.name);
   constructor(private readonly curriculumService: CurriculumService) {}
 
-  @Get('generate-code')
+  @Get('generateCode')
   @HttpCode(StatusCodes.CREATED)
   @ApiOperation({
     summary: 'Create curriculum code ...',
@@ -49,7 +49,7 @@ export class CurriculumController {
   async getNewCurrriculumCodeController() {
     return await this.curriculumService.generateNewCodeService();
   }
-  @Post('')
+  @Post('create')
   @HttpCode(StatusCodes.CREATED)
   @ApiOperation({
     summary: 'Create curriculum ...',
@@ -80,7 +80,7 @@ export class CurriculumController {
     });
   }
 
-  @Get('')
+  @Get('getAll')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({
     summary: 'Get all curriculum ...',
@@ -110,7 +110,7 @@ export class CurriculumController {
     });
   }
 
-  @Get(':id')
+  @Get('getById/:id')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({
     summary: 'Get curriculum by id ...',
@@ -130,7 +130,7 @@ export class CurriculumController {
     });
   }
 
-  @Put(':id')
+  @Put('update/:id')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({
     summary: 'Update curriculum ...',
@@ -163,7 +163,7 @@ export class CurriculumController {
     });
   }
 
-  @Delete(':id')
+  @Delete('delete/:id')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({
     summary: 'Delete curriculum ...',

@@ -24,11 +24,11 @@ import { ParseUUIDPipe } from '@nestjs/common';
 
 @ApiTags('Lesson')
 @ApiBearerAuth('access-token')
-@Controller('curriculum/lessons')
+@Controller('lesson')
 export class LessonController {
   constructor(private readonly lessonService: LessonService) {}
 
-  @Post('')
+  @Post('create')
   @HttpCode(StatusCodes.CREATED)
   @ApiOperation({ summary: 'Create lesson', description: 'Create a new lesson' })
   @ApiQuery({ name: 'curriculumId', description: 'Curriculum ID', type: 'string' })
@@ -91,7 +91,7 @@ export class LessonController {
     });
   }
 
-  @Get('')
+  @Get('getAll')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({
     summary: 'Get all lessons',
@@ -106,7 +106,7 @@ export class LessonController {
     return await this.lessonService.getAllLessonsService({ query });
   }
 
-  @Get(':id')
+  @Get('getById/:id')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({ summary: 'Get lesson by id' })
   @ApiParam({ name: 'id', description: 'Lesson ID', type: 'string' })
@@ -116,7 +116,7 @@ export class LessonController {
     return await this.lessonService.getLessonByIdService({ id });
   }
 
-  @Put(':id')
+  @Put('update/:id')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({ summary: 'Update lesson' })
   @ApiParam({ name: 'id', description: 'Lesson ID', type: 'string' })
@@ -135,7 +135,7 @@ export class LessonController {
     });
   }
 
-  @Delete(':id')
+  @Delete('delete/:id')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({ summary: 'Delete lesson' })
   @ApiParam({ name: 'id', description: 'Lesson ID', type: 'string' })

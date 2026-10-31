@@ -18,12 +18,12 @@ import { ParseUUIDPipe } from '@nestjs/common';
 
 @ApiTags('Attendance')
 @ApiBearerAuth('access-token')
-@Controller('attendances')
+@Controller('attendance')
 export class AttendanceController {
   constructor(private readonly attendanceService: AttendanceService) {}
 
   // todo : list a session roster merged with each student's attendance record ...
-  @Get('session/:sessionId')
+  @Get('getBySession/:sessionId')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({
     summary: ATTENDANCE_SWAGGER_MESSAGES.GET_ATTENDANCE_SUCCESSFULLY,
@@ -46,7 +46,7 @@ export class AttendanceController {
   }
 
   // todo : tutor marks/updates one student's attendance for a session (upsert) ...
-  @Put()
+  @Put('upsert')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({
     summary: ATTENDANCE_SWAGGER_MESSAGES.MARK_ATTENDANCE_SUCCESSFULLY,

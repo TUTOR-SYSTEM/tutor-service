@@ -27,12 +27,12 @@ import { ParseUUIDPipe } from '@nestjs/common';
 
 @ApiTags('Schedules')
 @ApiBearerAuth('access-token')
-@Controller('schedules')
+@Controller('schedule')
 export class ScheduleController {
   constructor(private readonly scheduleService: ScheduleService) {}
 
   // todo : create a single weekly schedule slot ...
-  @Post()
+  @Post('create')
   @HttpCode(StatusCodes.CREATED)
   @ApiOperation({ summary: 'Create schedule', description: 'Create a single weekly class slot' })
   @ApiBody({ schema: SCHEDULE_SWAGGERS_DATA.CREATE_SCHEDULE_SCHEMA })
@@ -50,7 +50,7 @@ export class ScheduleController {
   }
 
   // todo : bulk create weekly schedule slots for a class ...
-  @Post('bulk')
+  @Post('createBulk')
   @HttpCode(StatusCodes.CREATED)
   @ApiOperation({
     summary: 'Create schedules (bulk)',
@@ -71,7 +71,7 @@ export class ScheduleController {
   }
 
   // todo : list all schedules the current user can access (owned or enrolled classes) ...
-  @Get()
+  @Get('getAll')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({
     summary: 'Get schedules',
@@ -91,7 +91,7 @@ export class ScheduleController {
   }
 
   // todo : list all schedules of a class ...
-  @Get('class/:classId')
+  @Get('getByClass/:classId')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({ summary: 'Get schedules by class', description: 'List schedules of a class' })
   @ApiParam({ name: 'classId', type: String, format: 'uuid' })
@@ -108,7 +108,7 @@ export class ScheduleController {
   }
 
   // todo : get schedule detail ...
-  @Get(':id')
+  @Get('getById/:id')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({ summary: 'Get schedule', description: 'Get a schedule by id' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
@@ -118,7 +118,7 @@ export class ScheduleController {
   }
 
   // todo : update schedule ...
-  @Patch(':id')
+  @Patch('update/:id')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({ summary: 'Update schedule', description: 'Update a schedule by id' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
@@ -139,7 +139,7 @@ export class ScheduleController {
   }
 
   // todo : delete schedule ...
-  @Delete(':id')
+  @Delete('delete/:id')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({ summary: 'Delete schedule', description: 'Delete a schedule by id' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })

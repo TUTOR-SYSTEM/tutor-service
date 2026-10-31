@@ -28,7 +28,7 @@ import { ParseUUIDPipe } from '@nestjs/common';
 export class ChapterController {
   constructor(private readonly chapterService: ChapterService) {}
 
-  @Post(':curriculumId')
+  @Post('create/:curriculumId')
   @HttpCode(StatusCodes.CREATED)
   @ApiOperation({ summary: 'Create chapter', description: 'Create a new chapter for a curriculum' })
   @ApiParam({ name: 'curriculumId', description: 'Curriculum ID', type: 'string' })
@@ -58,7 +58,7 @@ export class ChapterController {
     });
   }
 
-  @Get('')
+  @Get('getAll')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({ summary: 'Get all chapters', description: 'Get all chapters for a curriculum' })
   @ApiQuery({ name: 'curriculumId', description: 'Curriculum ID', type: 'string', required: true })
@@ -73,7 +73,7 @@ export class ChapterController {
     return await this.chapterService.getAllChaptersService({ query });
   }
 
-  @Get(':id')
+  @Get('getById/:id')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({ summary: 'Get chapter by id' })
   @ApiParam({ name: 'id', description: 'Chapter ID', type: 'string' })
@@ -83,7 +83,7 @@ export class ChapterController {
     return await this.chapterService.getChapterByIdService({ id });
   }
 
-  @Put(':id')
+  @Put('update/:id')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({ summary: 'Update chapter' })
   @ApiParam({ name: 'id', description: 'Chapter ID', type: 'string' })
@@ -112,7 +112,7 @@ export class ChapterController {
     });
   }
 
-  @Delete(':id')
+  @Delete('delete/:id')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({ summary: 'Delete chapter' })
   @ApiParam({ name: 'id', description: 'Chapter ID', type: 'string' })

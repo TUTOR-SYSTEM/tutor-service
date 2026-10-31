@@ -20,7 +20,7 @@ import { ReportService } from './report.service';
 @ApiBearerAuth('access-token')
 @UseGuards(RolesGuard)
 @Roles('ADMIN')
-@Controller('reports/learning')
+@Controller('report')
 export class ReportController {
   constructor(private readonly reportService: ReportService) {}
 
@@ -36,7 +36,7 @@ export class ReportController {
     return this.reportService.getSummary();
   }
 
-  @Get('attendance-trend')
+  @Get('attendanceTrend')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({
     summary: 'Attendance trend',
@@ -47,7 +47,7 @@ export class ReportController {
     return this.reportService.getAttendanceTrend();
   }
 
-  @Get('classes')
+  @Get('classList')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({
     summary: 'Class report list',
