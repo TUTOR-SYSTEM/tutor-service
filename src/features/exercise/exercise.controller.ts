@@ -28,12 +28,12 @@ import { ParseUUIDPipe } from '@nestjs/common';
 
 @ApiTags('Exercises')
 @ApiBearerAuth('access-token')
-@Controller('exercises')
+@Controller('exercise')
 export class ExerciseController {
   constructor(private readonly exerciseService: ExerciseService) {}
 
   // todo : student submits an exercise (first submission) ...
-  @Post()
+  @Post('create')
   @HttpCode(StatusCodes.CREATED)
   @ApiOperation({
     summary: EXERCISE_SWAGGER_MESSAGES.CREATE_EXERCISE_SUCCESS,
@@ -54,7 +54,7 @@ export class ExerciseController {
   }
 
   // todo : list exercises reachable by the current user (as tutor or student) ...
-  @Get()
+  @Get('getAll')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({
     summary: EXERCISE_SWAGGER_MESSAGES.GET_EXERCISES_SUCCESSFULLY,
@@ -79,7 +79,7 @@ export class ExerciseController {
   }
 
   // todo : get an exercise submission by id ...
-  @Get(':id')
+  @Get('getById/:id')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({
     summary: EXERCISE_SWAGGER_MESSAGES.GET_EXERCISE_SUCCESSFULLY,
@@ -95,7 +95,7 @@ export class ExerciseController {
   }
 
   // todo : student re-submits their own (ungraded) work ...
-  @Patch(':id/submit')
+  @Patch('submit/:id')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({
     summary: EXERCISE_SWAGGER_MESSAGES.SUBMIT_EXERCISE_SUCCESSFULLY,
@@ -122,7 +122,7 @@ export class ExerciseController {
   }
 
   // todo : tutor grades a submission ...
-  @Patch(':id/grade')
+  @Patch('grade/:id')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({
     summary: EXERCISE_SWAGGER_MESSAGES.GRADE_EXERCISE_SUCCESSFULLY,

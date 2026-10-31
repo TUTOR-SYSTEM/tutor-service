@@ -24,11 +24,11 @@ import { ParseUUIDPipe } from '@nestjs/common';
 
 @ApiTags('Tuitions')
 @ApiBearerAuth('access-token')
-@Controller('tuitions')
+@Controller('tuition')
 export class TuitionController {
   constructor(private readonly tuitionService: TuitionService) {}
 
-  @Post()
+  @Post('create')
   @HttpCode(StatusCodes.CREATED)
   @ApiOperation({ summary: 'Create tuition record' })
   @ApiBody({
@@ -55,7 +55,7 @@ export class TuitionController {
     return this.tuitionService.create(dto, user.id, user.role);
   }
 
-  @Get()
+  @Get('getAll')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({ summary: 'List tuition records' })
   @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
@@ -72,7 +72,7 @@ export class TuitionController {
     return this.tuitionService.findAll({ userId: user.id, role: user.role, query });
   }
 
-  @Get('summary')
+  @Get('getSummary')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({
     summary: 'Tuition summary',
@@ -87,7 +87,7 @@ export class TuitionController {
     return this.tuitionService.getSummary({ userId: user.id, role: user.role, classId });
   }
 
-  @Get(':id')
+  @Get('getById/:id')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({ summary: 'Get tuition detail' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
@@ -99,7 +99,7 @@ export class TuitionController {
     return this.tuitionService.findById({ userId: user.id, role: user.role, id });
   }
 
-  @Put(':id')
+  @Put('update/:id')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({ summary: 'Update tuition record' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
@@ -125,7 +125,7 @@ export class TuitionController {
     return this.tuitionService.update(id, dto, user.id, user.role);
   }
 
-  @Delete(':id')
+  @Delete('delete/:id')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({ summary: 'Delete tuition record' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })

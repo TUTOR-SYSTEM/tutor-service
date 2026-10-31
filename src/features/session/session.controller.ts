@@ -28,12 +28,12 @@ import { ParseUUIDPipe } from '@nestjs/common';
 
 @ApiTags('Sessions')
 @ApiBearerAuth('access-token')
-@Controller('sessions')
+@Controller('session')
 export class SessionController {
   constructor(private readonly sessionService: SessionService) {}
 
   // todo : create a single class session ...
-  @Post()
+  @Post('create')
   @HttpCode(StatusCodes.CREATED)
   @ApiOperation({
     summary: SESSION_SWAGGER_MESSAGES.CREATE_SESSION_SUCCESS,
@@ -54,7 +54,7 @@ export class SessionController {
   }
 
   // todo : bulk create class sessions for a class ...
-  @Post('bulk')
+  @Post('createBulk')
   @HttpCode(StatusCodes.CREATED)
   @ApiOperation({
     summary: SESSION_SWAGGER_MESSAGES.CREATE_SESSIONS_SUCCESS,
@@ -75,7 +75,7 @@ export class SessionController {
   }
 
   // todo : list all sessions the current user can access (owned or enrolled classes) ...
-  @Get()
+  @Get('getAll')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({
     summary: SESSION_SWAGGER_MESSAGES.GET_SESSIONS_SUCCESSFULLY,
@@ -115,7 +115,7 @@ export class SessionController {
   }
 
   // todo : list all sessions of a class ...
-  @Get('class/:classId')
+  @Get('getByClass/:classId')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({
     summary: SESSION_SWAGGER_MESSAGES.GET_SESSIONS_SUCCESSFULLY,
@@ -138,7 +138,7 @@ export class SessionController {
   }
 
   // todo : get session detail ...
-  @Get(':id')
+  @Get('getById/:id')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({
     summary: SESSION_SWAGGER_MESSAGES.GET_SESSION_SUCCESSFULLY,
@@ -154,7 +154,7 @@ export class SessionController {
   }
 
   // todo : update session ...
-  @Put(':id')
+  @Put('update/:id')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({
     summary: SESSION_SWAGGER_MESSAGES.UPDATE_SESSION_SUCCESSFULLY,
@@ -181,7 +181,7 @@ export class SessionController {
   }
 
   // todo : delete session ...
-  @Delete(':id')
+  @Delete('delete/:id')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({
     summary: SESSION_SWAGGER_MESSAGES.DEL_SESSION_SUCCESSFULLY,

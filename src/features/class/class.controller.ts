@@ -28,12 +28,12 @@ import { ParseUUIDPipe } from '@nestjs/common';
 
 @ApiTags('Classes')
 @ApiBearerAuth('access-token')
-@Controller('classes')
+@Controller('class')
 export class ClassController {
   constructor(private readonly classService: ClassService) {}
 
   // todo : create new class controller ...
-  @Post()
+  @Post('create')
   @HttpCode(StatusCodes.CREATED)
   @ApiOperation({
     summary: 'Create class',
@@ -50,7 +50,7 @@ export class ClassController {
   }
 
   // todo : update class controller ...
-  @Put(':id')
+  @Put('update/:id')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({
     summary: 'Update class',
@@ -73,7 +73,7 @@ export class ClassController {
   }
 
   // todo : generate a unique class code ...
-  @Get('generate-code')
+  @Get('generateCode')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({
     summary: 'Generate class code',
@@ -86,7 +86,7 @@ export class ClassController {
   }
 
   //todo : get and filter classes controller ...
-  @Get('')
+  @Get('getAll')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({
     summary: CLASS_SWAGGER_MESSAGES.GET_CLASSES_SUCCESSFULLY,
@@ -118,7 +118,7 @@ export class ClassController {
     status: StatusCodes.OK,
     description: CLASS_SWAGGER_MESSAGES.GET_CLASS_SUCCESSFULLY,
   })
-  @Get('/:id')
+  @Get('getById/:id')
   getDetailClassController(
     @CurrentUser() user: Record<string, string>,
     @Param('id', ParseUUIDPipe) id: string,
@@ -127,7 +127,7 @@ export class ClassController {
   }
 
   // todo : add one student or bulk students to a class ...
-  @Post(':id/students')
+  @Post('addStudents/:id')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({
     summary: CLASS_SWAGGER_MESSAGES.ADD_STUDENTS_SUCCESSFULLY,
@@ -154,7 +154,7 @@ export class ClassController {
   }
 
   // todo : get list student in class ...
-  @Get('/:id/students')
+  @Get('getStudents/:id')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({
     summary: CLASS_SWAGGER_MESSAGES.GET_STUDENTS_SUCCESSFULLY,
@@ -177,7 +177,7 @@ export class ClassController {
   }
 
   // todo : get class materials (theory + exercise files) ...
-  @Get('/:id/materials')
+  @Get('getMaterials/:id')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({
     summary: 'Get class materials',
@@ -194,7 +194,7 @@ export class ClassController {
 
   // todo : get class "watch" overview (class + recent session + schedules + students) for
   // the STUDENT/PARENT read-only page ...
-  @Get('/:id/watches')
+  @Get('getWatch/:id')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({
     summary: 'Get class watch overview',
@@ -211,7 +211,7 @@ export class ClassController {
   }
 
   // todo : delete class ...
-  @Delete(':id')
+  @Delete('delete/:id')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({
     summary: CLASS_SWAGGER_MESSAGES.DEL_CLASS_SUCCESSFULLY,
