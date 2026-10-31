@@ -18,37 +18,39 @@ export class ScheduleRpcController {
   constructor(private readonly scheduleService: ScheduleService) {}
 
   @MessagePattern('schedule.create')
-  create(@Payload() payload: { userId: string; data: CreateScheduleDto }) {
+  create(@Payload() payload: { userId: string; role?: string; data: CreateScheduleDto }) {
     return this.scheduleService.createScheduleService(payload);
   }
 
   @MessagePattern('schedule.createBulk')
-  createBulk(@Payload() payload: { userId: string; data: CreateSchedulesDto }) {
+  createBulk(@Payload() payload: { userId: string; role?: string; data: CreateSchedulesDto }) {
     return this.scheduleService.createSchedulesService(payload);
   }
 
   @MessagePattern('schedule.getAll')
-  getAll(@Payload() payload: { userId: string; query: GetSchedulesQueryDto }) {
+  getAll(@Payload() payload: { userId: string; role?: string; query: GetSchedulesQueryDto }) {
     return this.scheduleService.getSchedulesService(payload);
   }
 
   @MessagePattern('schedule.getByClass')
-  getByClass(@Payload() payload: { userId: string; classId: string }) {
+  getByClass(@Payload() payload: { userId: string; role?: string; classId: string }) {
     return this.scheduleService.getSchedulesByClassService(payload);
   }
 
   @MessagePattern('schedule.getById')
-  getById(@Payload() payload: { userId: string; id: string }) {
+  getById(@Payload() payload: { userId: string; role?: string; id: string }) {
     return this.scheduleService.getScheduleService(payload);
   }
 
   @MessagePattern('schedule.update')
-  update(@Payload() payload: { userId: string; id: string; data: UpdateScheduleDto }) {
+  update(
+    @Payload() payload: { userId: string; role?: string; id: string; data: UpdateScheduleDto },
+  ) {
     return this.scheduleService.updateScheduleService(payload);
   }
 
   @MessagePattern('schedule.delete')
-  del(@Payload() payload: { userId: string; id: string }) {
+  del(@Payload() payload: { userId: string; role?: string; id: string }) {
     return this.scheduleService.delScheduleService(payload);
   }
 }

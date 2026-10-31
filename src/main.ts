@@ -13,6 +13,7 @@ import { HttpExceptionFilter, RpcExceptionFilter } from '@packages/filters';
 import { TraceContextInterceptor } from '@packages/interceptor';
 import { setLogSink } from '@packages/context/log-sink';
 import { RmqProducer } from './features/rabbitmq/rmq.producer';
+import { resolveCorsOrigins } from '@packages/helpers/cors.helper';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
@@ -23,7 +24,8 @@ async function bootstrap() {
   const rmqProducer = app.get(RmqProducer);
   setLogSink((entry) => rmqProducer.emit('log.create', entry));
 
-  app.enableCors({ origin: true, credentials: true });
+  // origin allowlist from CORS_ORIGINS (never `origin: true` with credentials in production)
+  app.enableCors({ origin: resolveCorsOrigins(), credentials: true });
   app.useGlobalInterceptors(new ResponseInterceptor(app.get(Reflector)));
   app.useGlobalInterceptors(new ErrorInterceptor(), new LoggerInterceptor());
   app.useGlobalFilters(new HttpExceptionFilter());

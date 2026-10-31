@@ -32,6 +32,7 @@ describe('LessonService', () => {
       findById: jest.fn(),
       update: jest.fn(),
       delete: jest.fn(),
+      chapterInCurriculum: jest.fn().mockResolvedValue(true),
     };
     // the curriculum is owned by OWNER_ID unless a test says otherwise
     curriculumRepo = {
@@ -78,6 +79,38 @@ describe('LessonService', () => {
       });
 
       expect(repo.create).toHaveBeenCalledWith(expect.objectContaining({ chapterId: CHAPTER_ID }));
+    });
+
+    it('refuses a chapter that belongs to a different curriculum (no insert)', async () => {
+      repo.chapterInCurriculum.mockResolvedValue(false);
+
+      await expect(
+        service.createLessonService({
+          userId: OWNER_ID,
+          curriculumId: CURRICULUM_ID,
+          chapterId: CHAPTER_ID,
+          data: {} as never,
+        }),
+      ).rejects.toThrow(new BadRequestException(ERROR_MESSAGES.LESSON_CHAPTER_MISMATCH));
+      expect(repo.chapterInCurriculum).toHaveBeenCalledWith({
+        chapterId: CHAPTER_ID,
+        curriculumId: CURRICULUM_ID,
+      });
+      expect(repo.create).not.toHaveBeenCalled();
+    });
+
+    it('lets ADMIN create inside a curriculum it does not own', async () => {
+      repo.create.mockResolvedValue({ id: LESSON_ID });
+
+      await service.createLessonService({
+        userId: OTHER_ID,
+        role: 'ADMIN',
+        curriculumId: CURRICULUM_ID,
+        chapterId: null,
+        data: { title: 'L1' } as never,
+      });
+
+      expect(repo.create).toHaveBeenCalled();
     });
 
     it('rejects a non-UUID curriculumId', async () => {
@@ -158,10 +191,12 @@ describe('LessonService', () => {
       });
     });
 
-    it('returns null (not throw) when the lesson is absent, so callers can decide', async () => {
+    it('throws NotFound (never null + 200) when the lesson is absent', async () => {
       repo.findById.mockResolvedValue(null);
 
-      await expect(service.getLessonByIdService({ id: LESSON_ID })).resolves.toBeNull();
+      await expect(service.getLessonByIdService({ id: LESSON_ID })).rejects.toThrow(
+        new NotFoundException(ERROR_MESSAGES.LESSON_NOT_FOUND),
+      );
     });
 
     it('rejects a non-UUID id', async () => {
@@ -172,6 +207,33 @@ describe('LessonService', () => {
   });
 
   describe('updateLessonService / deleteLessonService', () => {
+    it('rejects an empty update instead of writing nothing (C-LES-1 backend)', async () => {
+      repo.findById.mockResolvedValue({ id: LESSON_ID, curriculumId: CURRICULUM_ID });
+
+      await expect(
+        service.updateLessonService({
+          userId: OWNER_ID,
+          id: LESSON_ID,
+          data: { curriculumId: CURRICULUM_ID } as never,
+        }),
+      ).rejects.toThrow(new BadRequestException(ERROR_MESSAGES.VALIDATION_FAILED));
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses to move a lesson into a chapter of another curriculum', async () => {
+      repo.findById.mockResolvedValue({ id: LESSON_ID, curriculumId: CURRICULUM_ID });
+      repo.chapterInCurriculum.mockResolvedValue(false);
+
+      await expect(
+        service.updateLessonService({
+          userId: OWNER_ID,
+          id: LESSON_ID,
+          data: { chapterId: CHAPTER_ID, title: 'x' } as never,
+        }),
+      ).rejects.toThrow(new BadRequestException(ERROR_MESSAGES.LESSON_CHAPTER_MISMATCH));
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
     it('updates an existing lesson', async () => {
       repo.findById.mockResolvedValue({ id: LESSON_ID, curriculumId: CURRICULUM_ID });
       repo.update.mockResolvedValue({ id: LESSON_ID, title: 'New' });

@@ -17,32 +17,34 @@ export class TuitionRpcController {
   constructor(private readonly tuitionService: TuitionService) {}
 
   @MessagePattern('tuition.create')
-  create(@Payload() payload: { data: CreateTuitionDto; userId: string }) {
-    return this.tuitionService.create(payload.data, payload.userId);
+  create(@Payload() payload: { data: CreateTuitionDto; userId: string; role?: string }) {
+    return this.tuitionService.create(payload.data, payload.userId, payload.role);
   }
 
   @MessagePattern('tuition.getAll')
-  getAll(@Payload() payload: { userId: string; query: GetTuitionsQueryDto }) {
+  getAll(@Payload() payload: { userId: string; role?: string; query: GetTuitionsQueryDto }) {
     return this.tuitionService.findAll(payload);
   }
 
   @MessagePattern('tuition.getSummary')
-  getSummary(@Payload() payload: { userId: string; classId?: string }) {
+  getSummary(@Payload() payload: { userId: string; role?: string; classId?: string }) {
     return this.tuitionService.getSummary(payload);
   }
 
   @MessagePattern('tuition.getById')
-  getById(@Payload() payload: { userId: string; id: string }) {
+  getById(@Payload() payload: { userId: string; role?: string; id: string }) {
     return this.tuitionService.findById(payload);
   }
 
   @MessagePattern('tuition.update')
-  update(@Payload() payload: { id: string; data: UpdateTuitionDto; userId: string }) {
-    return this.tuitionService.update(payload.id, payload.data, payload.userId);
+  update(
+    @Payload() payload: { id: string; data: UpdateTuitionDto; userId: string; role?: string },
+  ) {
+    return this.tuitionService.update(payload.id, payload.data, payload.userId, payload.role);
   }
 
   @MessagePattern('tuition.delete')
-  del(@Payload() payload: { id: string; userId: string }) {
-    return this.tuitionService.delete(payload.id, payload.userId);
+  del(@Payload() payload: { id: string; userId: string; role?: string }) {
+    return this.tuitionService.delete(payload.id, payload.userId, payload.role);
   }
 }

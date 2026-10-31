@@ -54,7 +54,15 @@ export class SessionRepository {
   }
 
   // list every session across the classes the user owns (tutor) or is enrolled in (student)
-  async getAll({ userId, query }: { userId: string; query: GetSessionsQueryDto }) {
+  async getAll({
+    userId,
+    role,
+    query,
+  }: {
+    userId: string;
+    role?: string | null;
+    query: GetSessionsQueryDto;
+  }) {
     const { page = 1, limit = 10, search, status, classId, startDate, endDate } = query;
 
     const searchWhere = buildListWhereClause({
@@ -98,6 +106,29 @@ export class SessionRepository {
       where: { classId },
       orderBy: [{ sessionNumber: 'asc' }, { startAt: 'asc' }],
     });
+  }
+
+  // session numbers already used in the class (optionally ignoring one session, for updates)
+  async findTakenSessionNumbers({
+    classId,
+    numbers,
+    excludeId,
+  }: {
+    classId: string;
+    numbers: number[];
+    excludeId?: string;
+  }) {
+    const rows = await this.db
+      .select({ sessionNumber: sessions.sessionNumber })
+      .from(sessions)
+      .where(
+        and(
+          eq(sessions.classId, classId),
+          inArray(sessions.sessionNumber, numbers),
+          excludeId ? ne(sessions.id, excludeId) : undefined,
+        ),
+      );
+    return rows.map((row) => row.sessionNumber);
   }
 
   async getById({ id }: { id: string }) {

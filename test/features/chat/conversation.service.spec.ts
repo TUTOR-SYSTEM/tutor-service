@@ -450,6 +450,24 @@ describe('ConversationService', () => {
       const { data } = prisma.conversationParticipant.createMany.mock.calls[0][0];
       expect(data.map((d: { userId: string }) => d.userId)).toEqual([USER_ID, OTHER_ID, THIRD_ID]);
     });
+
+    it('rejects a member the creator is not allowed to chat with (no insert)', async () => {
+      queue('select', users, [user(CURRENT, 'PARENT'), user('a', 'STUDENT')]);
+
+      await expect(service.createGroupConversation(CURRENT, 'Study group', ['a'])).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(db.insert).not.toHaveBeenCalled();
+    });
+
+    it('rejects an unknown member id (no insert)', async () => {
+      queue('select', users, [user(CURRENT, 'ADMIN')]);
+
+      await expect(
+        service.createGroupConversation(CURRENT, 'Study group', ['ghost']),
+      ).rejects.toThrow(NotFoundException);
+      expect(db.insert).not.toHaveBeenCalled();
+    });
   });
 
   describe('createClassConversation', () => {
@@ -526,6 +544,27 @@ describe('ConversationService', () => {
       expect(prisma.conversationParticipant.create).toHaveBeenCalledWith({
         data: { conversationId: CONV_ID, userId: OTHER_ID },
       });
+    });
+
+    it('refuses to add members to a direct conversation', async () => {
+      queue('select', conversationParticipants, [{ userId: CURRENT }]);
+      queue('select', conversations, [{ type: 'DIRECT' }]);
+
+      await expect(service.addParticipant(CONV_ID, CURRENT, TARGET)).rejects.toThrow(
+        new ForbiddenException(ERROR_MESSAGES.CHAT_DIRECT_NO_ADD_PARTICIPANT),
+      );
+      expect(db.insert).not.toHaveBeenCalled();
+    });
+
+    it('refuses to add a user the caller may not chat with (no insert)', async () => {
+      queue('select', conversationParticipants, [{ userId: CURRENT }], []);
+      queue('select', conversations, [{ type: 'GROUP' }]);
+      queue('select', users, [user(CURRENT, 'PARENT'), user(TARGET, 'STUDENT')]);
+
+      await expect(service.addParticipant(CONV_ID, CURRENT, TARGET)).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(db.insert).not.toHaveBeenCalled();
     });
   });
 

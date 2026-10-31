@@ -166,8 +166,29 @@ export class ConversationService {
     return this.getConversationById(newConv.id, userId);
   }
 
+  // every member the creator adds must be a user the creator may chat with (same policy as DM)
+  private async assertCanChatWithAll(userId: string, targetIds: string[]) {
+    if (targetIds.length === 0) return;
+    const rows = await this.db
+      .select({ id: users.id, role: users.role })
+      .from(users)
+      .where(inArray(users.id, [userId, ...targetIds]));
+    const roleById = new Map(rows.map((r) => [r.id, r.role ?? 'STUDENT']));
+    const actorRole = roleById.get(userId);
+    if (!actorRole) throw new NotFoundException('Current user not found');
+    for (const targetId of targetIds) {
+      const targetRole = roleById.get(targetId);
+      if (!targetRole) throw new NotFoundException('Target user not found');
+      await this.validateChatPermission(actorRole, targetRole, userId, targetId);
+    }
+  }
+
   async createGroupConversation(userId: string, name: string, participantIds: string[]) {
     const allIds = [userId, ...participantIds.filter((id) => id !== userId)];
+    await this.assertCanChatWithAll(
+      userId,
+      allIds.filter((id) => id !== userId),
+    );
 
     const newConv = await this.prisma.conversation.create({
       data: { type: 'GROUP', name, createdBy: userId },

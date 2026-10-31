@@ -24,15 +24,16 @@ import {
 import { SessionService } from './session.service';
 import { SESSION_SWAGGER_MESSAGES } from 'src/data/swaggers/messages';
 import { SESSION_SWAGGERS_DATA } from 'src/data/swaggers/data/session.swagger';
+import { ParseUUIDPipe } from '@nestjs/common';
 
 @ApiTags('Sessions')
 @ApiBearerAuth('access-token')
-@Controller('sessions')
+@Controller('session')
 export class SessionController {
   constructor(private readonly sessionService: SessionService) {}
 
   // todo : create a single class session ...
-  @Post()
+  @Post('create')
   @HttpCode(StatusCodes.CREATED)
   @ApiOperation({
     summary: SESSION_SWAGGER_MESSAGES.CREATE_SESSION_SUCCESS,
@@ -45,11 +46,15 @@ export class SessionController {
     dto: CreateSessionDto,
     @CurrentUser() user: Record<string, string>,
   ) {
-    return this.sessionService.createSessionService({ userId: user?.id, data: dto });
+    return this.sessionService.createSessionService({
+      userId: user?.id,
+      role: user?.role,
+      data: dto,
+    });
   }
 
   // todo : bulk create class sessions for a class ...
-  @Post('bulk')
+  @Post('createBulk')
   @HttpCode(StatusCodes.CREATED)
   @ApiOperation({
     summary: SESSION_SWAGGER_MESSAGES.CREATE_SESSIONS_SUCCESS,
@@ -62,11 +67,15 @@ export class SessionController {
     dto: CreateSessionsDto,
     @CurrentUser() user: Record<string, string>,
   ) {
-    return this.sessionService.createSessionsService({ userId: user?.id, data: dto });
+    return this.sessionService.createSessionsService({
+      userId: user?.id,
+      role: user?.role,
+      data: dto,
+    });
   }
 
   // todo : list all sessions the current user can access (owned or enrolled classes) ...
-  @Get()
+  @Get('getAll')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({
     summary: SESSION_SWAGGER_MESSAGES.GET_SESSIONS_SUCCESSFULLY,
@@ -102,11 +111,11 @@ export class SessionController {
     @Query(new ZodValidationPipe<GetSessionsQueryDto>(getSessionsSchema))
     query: GetSessionsQueryDto,
   ) {
-    return this.sessionService.getSessionsService({ userId: user?.id, query });
+    return this.sessionService.getSessionsService({ userId: user?.id, role: user?.role, query });
   }
 
   // todo : list all sessions of a class ...
-  @Get('class/:classId')
+  @Get('getByClass/:classId')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({
     summary: SESSION_SWAGGER_MESSAGES.GET_SESSIONS_SUCCESSFULLY,
@@ -117,12 +126,19 @@ export class SessionController {
     status: StatusCodes.OK,
     description: SESSION_SWAGGER_MESSAGES.GET_SESSIONS_SUCCESSFULLY,
   })
-  getByClass(@CurrentUser() user: Record<string, string>, @Param('classId') classId: string) {
-    return this.sessionService.getSessionsByClassService({ userId: user?.id, classId });
+  getByClass(
+    @CurrentUser() user: Record<string, string>,
+    @Param('classId', ParseUUIDPipe) classId: string,
+  ) {
+    return this.sessionService.getSessionsByClassService({
+      userId: user?.id,
+      role: user?.role,
+      classId,
+    });
   }
 
   // todo : get session detail ...
-  @Get(':id')
+  @Get('getById/:id')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({
     summary: SESSION_SWAGGER_MESSAGES.GET_SESSION_SUCCESSFULLY,
@@ -133,12 +149,12 @@ export class SessionController {
     status: StatusCodes.OK,
     description: SESSION_SWAGGER_MESSAGES.GET_SESSION_SUCCESSFULLY,
   })
-  getDetail(@CurrentUser() user: Record<string, string>, @Param('id') id: string) {
-    return this.sessionService.getSessionService({ userId: user?.id, id });
+  getDetail(@CurrentUser() user: Record<string, string>, @Param('id', ParseUUIDPipe) id: string) {
+    return this.sessionService.getSessionService({ userId: user?.id, role: user?.role, id });
   }
 
   // todo : update session ...
-  @Put(':id')
+  @Put('update/:id')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({
     summary: SESSION_SWAGGER_MESSAGES.UPDATE_SESSION_SUCCESSFULLY,
@@ -152,15 +168,20 @@ export class SessionController {
   })
   update(
     @CurrentUser() user: Record<string, string>,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body(new ZodValidationPipe<UpdateSessionDto>(updateSessionSchema))
     dto: UpdateSessionDto,
   ) {
-    return this.sessionService.updateSessionService({ userId: user?.id, id, data: dto });
+    return this.sessionService.updateSessionService({
+      userId: user?.id,
+      role: user?.role,
+      id,
+      data: dto,
+    });
   }
 
   // todo : delete session ...
-  @Delete(':id')
+  @Delete('delete/:id')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({
     summary: SESSION_SWAGGER_MESSAGES.DEL_SESSION_SUCCESSFULLY,
@@ -171,7 +192,7 @@ export class SessionController {
     status: StatusCodes.OK,
     description: SESSION_SWAGGER_MESSAGES.DEL_SESSION_SUCCESSFULLY,
   })
-  del(@CurrentUser() user: Record<string, string>, @Param('id') id: string) {
-    return this.sessionService.delSessionService({ userId: user?.id, id });
+  del(@CurrentUser() user: Record<string, string>, @Param('id', ParseUUIDPipe) id: string) {
+    return this.sessionService.delSessionService({ userId: user?.id, role: user?.role, id });
   }
 }

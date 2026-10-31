@@ -20,14 +20,15 @@ import {
   type UpdateTuitionDto,
 } from '@packages/entities/tuition';
 import { TuitionService } from './tuition.service';
+import { ParseUUIDPipe } from '@nestjs/common';
 
 @ApiTags('Tuitions')
 @ApiBearerAuth('access-token')
-@Controller('tuitions')
+@Controller('tuition')
 export class TuitionController {
   constructor(private readonly tuitionService: TuitionService) {}
 
-  @Post()
+  @Post('create')
   @HttpCode(StatusCodes.CREATED)
   @ApiOperation({ summary: 'Create tuition record' })
   @ApiBody({
@@ -51,10 +52,10 @@ export class TuitionController {
     dto: CreateTuitionDto,
     @CurrentUser() user: Record<string, string>,
   ) {
-    return this.tuitionService.create(dto, user.id);
+    return this.tuitionService.create(dto, user.id, user.role);
   }
 
-  @Get()
+  @Get('getAll')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({ summary: 'List tuition records' })
   @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
@@ -68,10 +69,10 @@ export class TuitionController {
     query: GetTuitionsQueryDto,
     @CurrentUser() user: Record<string, string>,
   ) {
-    return this.tuitionService.findAll({ userId: user.id, query });
+    return this.tuitionService.findAll({ userId: user.id, role: user.role, query });
   }
 
-  @Get('summary')
+  @Get('getSummary')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({
     summary: 'Tuition summary',
@@ -83,19 +84,22 @@ export class TuitionController {
     @CurrentUser() user: Record<string, string>,
     @Query('classId') classId?: string,
   ) {
-    return this.tuitionService.getSummary({ userId: user.id, classId });
+    return this.tuitionService.getSummary({ userId: user.id, role: user.role, classId });
   }
 
-  @Get(':id')
+  @Get('getById/:id')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({ summary: 'Get tuition detail' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
   @SwaggerResponse({ status: 200, description: 'Tuition detail' })
-  async findById(@Param('id') id: string, @CurrentUser() user: Record<string, string>) {
-    return this.tuitionService.findById({ userId: user.id, id });
+  async findById(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: Record<string, string>,
+  ) {
+    return this.tuitionService.findById({ userId: user.id, role: user.role, id });
   }
 
-  @Put(':id')
+  @Put('update/:id')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({ summary: 'Update tuition record' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
@@ -113,20 +117,23 @@ export class TuitionController {
   })
   @SwaggerResponse({ status: 200, description: 'Tuition updated' })
   async update(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body(new ZodValidationPipe(updateTuitionSchema))
     dto: UpdateTuitionDto,
     @CurrentUser() user: Record<string, string>,
   ) {
-    return this.tuitionService.update(id, dto, user.id);
+    return this.tuitionService.update(id, dto, user.id, user.role);
   }
 
-  @Delete(':id')
+  @Delete('delete/:id')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({ summary: 'Delete tuition record' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
   @SwaggerResponse({ status: 200, description: 'Tuition deleted' })
-  async delete(@Param('id') id: string, @CurrentUser() user: Record<string, string>) {
-    return this.tuitionService.delete(id, user.id);
+  async delete(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: Record<string, string>,
+  ) {
+    return this.tuitionService.delete(id, user.id, user.role);
   }
 }

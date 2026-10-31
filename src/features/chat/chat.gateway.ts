@@ -15,6 +15,7 @@ import { PrismaService } from '../../database/prisma.service';
 import { resolveJwtAccessSecret } from '../../packages/configs/jwt-sign.config';
 import { MessageService } from './message.service';
 import { ConversationService } from './conversation.service';
+import { resolveCorsOrigins } from '@packages/helpers/cors.helper';
 
 type AuthenticatedSocket = Socket & {
   userId?: string;
@@ -24,7 +25,7 @@ type AuthenticatedSocket = Socket & {
 
 @WebSocketGateway({
   cors: {
-    origin: true,
+    origin: resolveCorsOrigins(),
     credentials: true,
   },
   namespace: '/chat',

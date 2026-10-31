@@ -20,14 +20,15 @@ import {
 } from '@packages/entities';
 import { LessonService } from './lesson.service';
 import { ZodValidationPipe } from '@packages/pipes';
+import { ParseUUIDPipe } from '@nestjs/common';
 
 @ApiTags('Lesson')
 @ApiBearerAuth('access-token')
-@Controller('curriculum/lessons')
+@Controller('lesson')
 export class LessonController {
   constructor(private readonly lessonService: LessonService) {}
 
-  @Post('')
+  @Post('create')
   @HttpCode(StatusCodes.CREATED)
   @ApiOperation({ summary: 'Create lesson', description: 'Create a new lesson' })
   @ApiQuery({ name: 'curriculumId', description: 'Curriculum ID', type: 'string' })
@@ -83,13 +84,14 @@ export class LessonController {
   ) {
     return await this.lessonService.createLessonService({
       userId: user.id,
+      role: user.role,
       curriculumId,
       chapterId,
       data,
     });
   }
 
-  @Get('')
+  @Get('getAll')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({
     summary: 'Get all lessons',
@@ -104,17 +106,17 @@ export class LessonController {
     return await this.lessonService.getAllLessonsService({ query });
   }
 
-  @Get(':id')
+  @Get('getById/:id')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({ summary: 'Get lesson by id' })
   @ApiParam({ name: 'id', description: 'Lesson ID', type: 'string' })
   @SwaggerResponse({ status: StatusCodes.OK, description: 'Get lesson by id' })
   @ApiResponse({ statusCode: StatusCodes.OK, message: 'Get lesson successfully' })
-  async getLessonByIdController(@Param('id') id: string) {
+  async getLessonByIdController(@Param('id', ParseUUIDPipe) id: string) {
     return await this.lessonService.getLessonByIdService({ id });
   }
 
-  @Put(':id')
+  @Put('update/:id')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({ summary: 'Update lesson' })
   @ApiParam({ name: 'id', description: 'Lesson ID', type: 'string' })
@@ -122,13 +124,18 @@ export class LessonController {
   @ApiResponse({ statusCode: StatusCodes.OK, message: 'Update lesson successfully' })
   async updateLessonController(
     @CurrentUser() user: Record<string, string>,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body(new ZodValidationPipe<UpdateLessonDto>(updateLessonSchema)) data: UpdateLessonDto,
   ) {
-    return await this.lessonService.updateLessonService({ userId: user.id, id, data });
+    return await this.lessonService.updateLessonService({
+      userId: user.id,
+      role: user.role,
+      id,
+      data,
+    });
   }
 
-  @Delete(':id')
+  @Delete('delete/:id')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({ summary: 'Delete lesson' })
   @ApiParam({ name: 'id', description: 'Lesson ID', type: 'string' })
@@ -136,8 +143,8 @@ export class LessonController {
   @ApiResponse({ statusCode: StatusCodes.OK, message: 'Delete lesson successfully' })
   async deleteLessonController(
     @CurrentUser() user: Record<string, string>,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return await this.lessonService.deleteLessonService({ userId: user.id, id });
+    return await this.lessonService.deleteLessonService({ userId: user.id, role: user.role, id });
   }
 }

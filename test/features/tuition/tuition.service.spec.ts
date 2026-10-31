@@ -101,7 +101,15 @@ describe('TuitionService', () => {
       await expect(service.findById({ userId: TUTOR_ID, id: TUITION_ID })).resolves.toEqual({
         id: TUITION_ID,
       });
-      expect(repo.findById).toHaveBeenCalledWith(TUITION_ID, TUTOR_ID);
+      expect(repo.findById).toHaveBeenCalledWith(TUITION_ID, TUTOR_ID, undefined);
+    });
+
+    it('passes ADMIN through so the repository can read any tuition', async () => {
+      repo.findById.mockResolvedValue({ id: TUITION_ID });
+
+      await service.findById({ userId: TUTOR_ID, role: 'ADMIN', id: TUITION_ID });
+
+      expect(repo.findById).toHaveBeenCalledWith(TUITION_ID, TUTOR_ID, 'ADMIN');
     });
 
     it('returns NotFound when the user cannot see it (repo returns nothing)', async () => {

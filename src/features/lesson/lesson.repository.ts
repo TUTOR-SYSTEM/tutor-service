@@ -63,6 +63,22 @@ export class LessonRepository {
     return this.prisma.lesson.findUnique({ where: { id } });
   }
 
+  // true when the chapter exists and belongs to the given curriculum
+  async chapterInCurriculum({
+    chapterId,
+    curriculumId,
+  }: {
+    chapterId: string;
+    curriculumId: string;
+  }): Promise<boolean> {
+    const [row] = await this.db
+      .select({ id: chapters.id })
+      .from(chapters)
+      .where(and(eq(chapters.id, chapterId), eq(chapters.curriculumId, curriculumId)))
+      .limit(1);
+    return !!row;
+  }
+
   async update(id: string, data: UpdateLessonDto) {
     try {
       return await this.prisma.lesson.update({ where: { id }, data });

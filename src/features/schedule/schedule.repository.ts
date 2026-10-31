@@ -46,7 +46,15 @@ export class ScheduleRepository {
   }
 
   // list every schedule across the classes the user owns (tutor) or is enrolled in (student)
-  async getAll({ userId, query }: { userId: string; query: GetSchedulesQueryDto }) {
+  async getAll({
+    userId,
+    role,
+    query,
+  }: {
+    userId: string;
+    role?: string | null;
+    query: GetSchedulesQueryDto;
+  }) {
     const { page = 1, limit = 10, search, classId } = query;
 
     const searchWhere = buildListWhereClause({

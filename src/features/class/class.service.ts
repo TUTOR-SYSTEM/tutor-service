@@ -16,7 +16,7 @@ import {
   GetClassesQueryDto,
   UpdateClassDto,
 } from '@packages/entities/class';
-import { checkUuidValid, generateCode } from '@packages/helpers';
+import { canActOnOwned, checkUuidValid, generateCode } from '@packages/helpers';
 import { UserService } from '../user/user.service';
 import { ERROR_MESSAGES } from 'src/data/constants';
 
@@ -62,14 +62,22 @@ export class ClassService {
     return ['P2002', '23505'].includes(e?.code ?? '') || e?.cause?.code === '23505';
   }
 
-  async createClassService({ userId, data }: { userId: string; data: CreateClassDto }) {
+  async createClassService({
+    userId,
+    data,
+  }: {
+    userId: string;
+    role?: string | null;
+    data: CreateClassDto;
+  }) {
     const { name, code, tutorId } = data;
     if (!userId || (userId && !checkUuidValid({ data: userId }))) {
       throw new BadRequestException(ERROR_MESSAGES.USER_ID_MUST_BE_UUID);
     }
     const acting = await this.user.getUserRoleById(userId);
     if (!acting) throw new BadRequestException(ERROR_MESSAGES.USER_NOT_FOUND);
-    // Only tutors/admins may create classes; every later ownership check is `tutorId === userId`,
+    // Only tutors/admins may create classes; every later ownership check is `tutorId === userId`
+    // (ADMIN bypasses it via canActOnOwned),
     // so letting any role pick itself as tutor would hand out owner powers (roster, tuition...).
     if (acting.role !== 'TUTOR' && acting.role !== 'ADMIN') {
       throw new ForbiddenException(ERROR_MESSAGES.PERMISSION_DENIED);
@@ -109,10 +117,12 @@ export class ClassService {
 
   async updateClassService({
     userId,
+    role,
     id,
     data,
   }: {
     userId: string;
+    role?: string | null;
     id: string;
     data: UpdateClassDto;
   }) {
@@ -122,7 +132,7 @@ export class ClassService {
       throw new BadRequestException(ERROR_MESSAGES.CLASS_ID_MUST_BE_UUID);
 
     const classData = await this.repo.getClassByField({ field: 'id', value: id });
-    if (!classData || classData.tutorId !== userId)
+    if (!classData || !canActOnOwned({ userId, role }, classData.tutorId))
       throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
 
     if (data.name && data.name !== classData.name) {
@@ -149,7 +159,14 @@ export class ClassService {
     return updated ?? classData;
   }
 
-  async getClassesService({ userId, query }: { userId: string; query: GetClassesQueryDto }) {
+  async getClassesService({
+    userId,
+    query,
+  }: {
+    userId: string;
+    role?: string | null;
+    query: GetClassesQueryDto;
+  }) {
     if (!userId || (userId && !checkUuidValid({ data: userId })))
       throw new BadRequestException(ERROR_MESSAGES.USER_ID_MUST_BE_UUID);
 
@@ -164,19 +181,54 @@ export class ClassService {
 
   // light ownership gate for child resources (schedule/session): one class row, no roster join.
   // NotFound (not Forbidden) when the class is missing or owned by someone else.
-  async getOwnedClassService({ userId, id }: { userId: string; id: string }) {
+  async getOwnedClassService({
+    userId,
+    role,
+    id,
+  }: {
+    userId: string;
+    role?: string | null;
+    id: string;
+  }) {
     if (!id || !checkUuidValid({ data: id }))
       throw new BadRequestException(ERROR_MESSAGES.CLASS_ID_MUST_BE_UUID);
     const classData = await this.repo.getClassByField({ field: 'id', value: id });
-    if (!classData || classData.tutorId !== userId)
+    if (!classData || !canActOnOwned({ userId, role }, classData.tutorId))
       throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
     return classData;
+  }
+
+  // enrolment check used by other features (e.g. exercise submissions must belong to the class)
+  async isStudentInClassService({ classId, studentId }: { classId: string; studentId: string }) {
+    return this.repo.isEnrolled({ userId: studentId, classId });
+  }
+
+  // public read gate for child resources (schedule/session reads): owner, enrolled student,
+  // parent of an enrolled student, or ADMIN. NotFound when the class is missing or not visible.
+  async getAccessibleClassService({
+    userId,
+    role,
+    id,
+  }: {
+    userId: string;
+    role?: string | null;
+    id: string;
+  }) {
+    return this.loadAccessibleClass({ userId, role, id });
   }
 
   //todo : get detail class service ...
   // shared read gate: owner (tutor), enrolled student, or parent of an enrolled student.
   // Missing class and no access both surface as NotFound.
-  private async loadAccessibleClass({ userId, id }: { userId: string; id: string }) {
+  private async loadAccessibleClass({
+    userId,
+    role,
+    id,
+  }: {
+    userId: string;
+    role?: string | null;
+    id: string;
+  }) {
     if (!userId || !checkUuidValid({ data: userId }))
       throw new BadRequestException(ERROR_MESSAGES.USER_ID_MUST_BE_UUID);
     if (!id || !checkUuidValid({ data: id }))
@@ -185,7 +237,7 @@ export class ClassService {
     const classData = await this.repo.getClassByField({ field: 'id', value: id });
     if (!classData) throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
 
-    const isOwner = classData.tutorId === userId;
+    const isOwner = canActOnOwned({ userId, role }, classData.tutorId);
     const canAccess =
       isOwner ||
       (await this.repo.isEnrolled({ userId, classId: id })) ||
@@ -220,7 +272,15 @@ export class ClassService {
 
   // detail read: class owner (tutor), an enrolled student, or a parent of an enrolled student —
   // same access rule as getClassWatchService. Anyone else gets NotFound (not Forbidden).
-  async getClassService({ userId, id }: { userId: string; id: string }) {
+  async getClassService({
+    userId,
+    role,
+    id,
+  }: {
+    userId: string;
+    role?: string | null;
+    id: string;
+  }) {
     if (!userId || !checkUuidValid({ data: userId }))
       throw new BadRequestException(ERROR_MESSAGES.USER_ID_MUST_BE_UUID);
     if (!id || !checkUuidValid({ data: id }))
@@ -229,7 +289,7 @@ export class ClassService {
     const classData = await this.repo.getClass({ id });
     if (!classData) throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
 
-    const isOwner = classData.tutorId === userId;
+    const isOwner = canActOnOwned({ userId, role }, classData.tutorId);
     const canAccess =
       isOwner ||
       (await this.repo.isEnrolled({ userId, classId: id })) ||
@@ -242,10 +302,12 @@ export class ClassService {
   // add one student (studentIds of length 1) or bulk students into a single class
   async addStudentsService({
     userId,
+    role,
     classId,
     data,
   }: {
     userId: string;
+    role?: string | null;
     classId: string;
     data: AddStudentsDto;
   }) {
@@ -254,9 +316,9 @@ export class ClassService {
     if (!classId || !checkUuidValid({ data: classId }))
       throw new BadRequestException(ERROR_MESSAGES.CLASS_ID_MUST_BE_UUID);
 
-    // the class must exist and be owned by the acting tutor
+    // the class must exist and be owned by the acting tutor (ADMIN bypasses ownership)
     const classData = await this.repo.getClassByField({ field: 'id', value: classId });
-    if (!classData || classData.tutorId !== userId)
+    if (!classData || !canActOnOwned({ userId, role }, classData.tutorId))
       throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
 
     // dedupe input, then verify every id references an existing STUDENT user
@@ -274,7 +336,15 @@ export class ClassService {
     };
   }
 
-  async delClassService({ userId, id }: { userId: string; id: string }) {
+  async delClassService({
+    userId,
+    role,
+    id,
+  }: {
+    userId: string;
+    role?: string | null;
+    id: string;
+  }) {
     if (!userId || (userId && !checkUuidValid({ data: userId })))
       throw new BadRequestException(ERROR_MESSAGES.USER_ID_MUST_BE_UUID);
     if (!id || !checkUuidValid({ data: id }))
@@ -284,7 +354,8 @@ export class ClassService {
       throw new NotFoundException(ERROR_MESSAGES.USER_NOT_EXIST);
     const classData = await this.repo.getClassByField({ field: 'id', value: id });
     if (!classData) throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
-    if (classData.tutorId !== userId) throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
+    if (!canActOnOwned({ userId, role }, classData.tutorId))
+      throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
 
     // deleting cascades to tuitions, attendances, sessions and schedules: keep financial history
     if (await this.repo.hasTuitionHistory({ classId: id }))
@@ -298,8 +369,16 @@ export class ClassService {
 
   // list a class's learning materials (theory + exercise files) resolved through its curriculum.
   // Returns lessons each carrying theoryUrls/exerciseUrls so the FE can render either list.
-  async getClassMaterialsService({ userId, id }: { userId: string; id: string }) {
-    const { classData } = await this.loadAccessibleClass({ userId, id });
+  async getClassMaterialsService({
+    userId,
+    role,
+    id,
+  }: {
+    userId: string;
+    role?: string | null;
+    id: string;
+  }) {
+    const { classData } = await this.loadAccessibleClass({ userId, role, id });
 
     const classSummary = {
       id: classData.id,
@@ -322,8 +401,16 @@ export class ClassService {
   // aggregated overview for the STUDENT/PARENT "watch" page: class + recent session + weekly
   // schedule + roster in one call. Access: class owner (tutor), an enrolled student, or a
   // parent of an enrolled student — same rule as SessionService.getSessionService.
-  async getClassWatchService({ userId, id }: { userId: string; id: string }) {
-    const { classData, isOwner } = await this.loadAccessibleClass({ userId, id });
+  async getClassWatchService({
+    userId,
+    role,
+    id,
+  }: {
+    userId: string;
+    role?: string | null;
+    id: string;
+  }) {
+    const { classData, isOwner } = await this.loadAccessibleClass({ userId, role, id });
 
     const [students, schedules, recentSessionRow] = await Promise.all([
       this.repo.getAllStudent({ id }).then((rows) => (isOwner ? rows : this.toPublicRoster(rows))),
@@ -341,8 +428,16 @@ export class ClassService {
     return { class: classData, recentSession: recentSession ?? null, schedules, students };
   }
 
-  async getAllStudentsService({ userId, id }: { userId: string; id: string }) {
-    const { isOwner } = await this.loadAccessibleClass({ userId, id });
+  async getAllStudentsService({
+    userId,
+    role,
+    id,
+  }: {
+    userId: string;
+    role?: string | null;
+    id: string;
+  }) {
+    const { isOwner } = await this.loadAccessibleClass({ userId, role, id });
     const roster = await this.repo.getAllStudent({ id });
     return isOwner ? roster : this.toPublicRoster(roster);
   }

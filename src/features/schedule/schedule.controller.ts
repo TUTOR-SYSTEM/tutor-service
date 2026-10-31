@@ -23,15 +23,16 @@ import {
 } from '@packages/entities/schedule';
 import { ScheduleService } from './schedule.service';
 import { SCHEDULE_SWAGGERS_DATA } from 'src/data/swaggers/data/schedule.swagger';
+import { ParseUUIDPipe } from '@nestjs/common';
 
 @ApiTags('Schedules')
 @ApiBearerAuth('access-token')
-@Controller('schedules')
+@Controller('schedule')
 export class ScheduleController {
   constructor(private readonly scheduleService: ScheduleService) {}
 
   // todo : create a single weekly schedule slot ...
-  @Post()
+  @Post('create')
   @HttpCode(StatusCodes.CREATED)
   @ApiOperation({ summary: 'Create schedule', description: 'Create a single weekly class slot' })
   @ApiBody({ schema: SCHEDULE_SWAGGERS_DATA.CREATE_SCHEDULE_SCHEMA })
@@ -41,11 +42,15 @@ export class ScheduleController {
     dto: CreateScheduleDto,
     @CurrentUser() user: Record<string, string>,
   ) {
-    return this.scheduleService.createScheduleService({ userId: user?.id, data: dto });
+    return this.scheduleService.createScheduleService({
+      userId: user?.id,
+      role: user?.role,
+      data: dto,
+    });
   }
 
   // todo : bulk create weekly schedule slots for a class ...
-  @Post('bulk')
+  @Post('createBulk')
   @HttpCode(StatusCodes.CREATED)
   @ApiOperation({
     summary: 'Create schedules (bulk)',
@@ -58,11 +63,15 @@ export class ScheduleController {
     dto: CreateSchedulesDto,
     @CurrentUser() user: Record<string, string>,
   ) {
-    return this.scheduleService.createSchedulesService({ userId: user?.id, data: dto });
+    return this.scheduleService.createSchedulesService({
+      userId: user?.id,
+      role: user?.role,
+      data: dto,
+    });
   }
 
   // todo : list all schedules the current user can access (owned or enrolled classes) ...
-  @Get()
+  @Get('getAll')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({
     summary: 'Get schedules',
@@ -78,31 +87,38 @@ export class ScheduleController {
     @Query(new ZodValidationPipe<GetSchedulesQueryDto>(getSchedulesSchema))
     query: GetSchedulesQueryDto,
   ) {
-    return this.scheduleService.getSchedulesService({ userId: user?.id, query });
+    return this.scheduleService.getSchedulesService({ userId: user?.id, role: user?.role, query });
   }
 
   // todo : list all schedules of a class ...
-  @Get('class/:classId')
+  @Get('getByClass/:classId')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({ summary: 'Get schedules by class', description: 'List schedules of a class' })
   @ApiParam({ name: 'classId', type: String, format: 'uuid' })
   @SwaggerResponse({ status: StatusCodes.OK, description: 'Schedules fetched' })
-  getByClass(@CurrentUser() user: Record<string, string>, @Param('classId') classId: string) {
-    return this.scheduleService.getSchedulesByClassService({ userId: user?.id, classId });
+  getByClass(
+    @CurrentUser() user: Record<string, string>,
+    @Param('classId', ParseUUIDPipe) classId: string,
+  ) {
+    return this.scheduleService.getSchedulesByClassService({
+      userId: user?.id,
+      role: user?.role,
+      classId,
+    });
   }
 
   // todo : get schedule detail ...
-  @Get(':id')
+  @Get('getById/:id')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({ summary: 'Get schedule', description: 'Get a schedule by id' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
   @SwaggerResponse({ status: StatusCodes.OK, description: 'Schedule fetched' })
-  getDetail(@CurrentUser() user: Record<string, string>, @Param('id') id: string) {
-    return this.scheduleService.getScheduleService({ userId: user?.id, id });
+  getDetail(@CurrentUser() user: Record<string, string>, @Param('id', ParseUUIDPipe) id: string) {
+    return this.scheduleService.getScheduleService({ userId: user?.id, role: user?.role, id });
   }
 
   // todo : update schedule ...
-  @Patch(':id')
+  @Patch('update/:id')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({ summary: 'Update schedule', description: 'Update a schedule by id' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
@@ -110,20 +126,25 @@ export class ScheduleController {
   @SwaggerResponse({ status: StatusCodes.OK, description: 'Schedule updated' })
   update(
     @CurrentUser() user: Record<string, string>,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body(new ZodValidationPipe<UpdateScheduleDto>(updateScheduleSchema))
     dto: UpdateScheduleDto,
   ) {
-    return this.scheduleService.updateScheduleService({ userId: user?.id, id, data: dto });
+    return this.scheduleService.updateScheduleService({
+      userId: user?.id,
+      role: user?.role,
+      id,
+      data: dto,
+    });
   }
 
   // todo : delete schedule ...
-  @Delete(':id')
+  @Delete('delete/:id')
   @HttpCode(StatusCodes.OK)
   @ApiOperation({ summary: 'Delete schedule', description: 'Delete a schedule by id' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
   @SwaggerResponse({ status: StatusCodes.OK, description: 'Schedule deleted' })
-  del(@CurrentUser() user: Record<string, string>, @Param('id') id: string) {
-    return this.scheduleService.delScheduleService({ userId: user?.id, id });
+  del(@CurrentUser() user: Record<string, string>, @Param('id', ParseUUIDPipe) id: string) {
+    return this.scheduleService.delScheduleService({ userId: user?.id, role: user?.role, id });
   }
 }

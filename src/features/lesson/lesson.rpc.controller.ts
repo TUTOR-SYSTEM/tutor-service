@@ -21,6 +21,7 @@ export class LessonRpcController {
     @Payload()
     payload: {
       userId: string;
+      role?: string;
       curriculumId: string;
       chapterId?: string | null;
       data: CreateLessonBodyDto;
@@ -40,12 +41,12 @@ export class LessonRpcController {
   }
 
   @MessagePattern('lesson.update')
-  update(@Payload() payload: { userId: string; id: string; data: UpdateLessonDto }) {
+  update(@Payload() payload: { userId: string; role?: string; id: string; data: UpdateLessonDto }) {
     return this.lessonService.updateLessonService(payload);
   }
 
   @MessagePattern('lesson.delete')
-  del(@Payload() payload: { userId: string; id: string }) {
+  del(@Payload() payload: { userId: string; role?: string; id: string }) {
     return this.lessonService.deleteLessonService(payload);
   }
 }

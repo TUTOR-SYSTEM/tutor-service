@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ERROR_MESSAGES } from 'src/data/constants';
-import { checkUuidValid } from '@packages/helpers';
+import { canActOnOwned, checkUuidValid } from '@packages/helpers';
 import type { AttendanceRecordDto, UpsertAttendanceDto } from '@packages/entities/attendance';
 import { AttendanceRepository } from './attendance.repository';
 import { SessionService } from '../session/session.service';
@@ -28,16 +28,22 @@ export class AttendanceService {
   // read access mirrors session detail: class tutor (owner), an enrolled student, or their parent
   async getBySessionService({
     userId,
+    role,
     sessionId,
   }: {
     userId: string;
+    role?: string | null;
     sessionId: string;
   }): Promise<AttendanceRecordDto[]> {
     this.assertUuid(userId, 'User Id');
     this.assertUuid(sessionId, 'Session Id');
 
-    const session = await this.sessionService.getSessionService({ userId, id: sessionId });
-    const roster = await this.classService.getAllStudentsService({ userId, id: session.classId });
+    const session = await this.sessionService.getSessionService({ userId, role, id: sessionId });
+    const roster = await this.classService.getAllStudentsService({
+      userId,
+      role,
+      id: session.classId,
+    });
     const records = await this.repo.findBySession({ sessionId });
     const byStudent = new Map(records.map((r) => [r.studentId, r]));
 
@@ -57,18 +63,31 @@ export class AttendanceService {
   }
 
   // tutor (class owner) marks/updates one student's attendance for a session
-  async upsertAttendanceService({ userId, data }: { userId: string; data: UpsertAttendanceDto }) {
+  async upsertAttendanceService({
+    userId,
+    role,
+    data,
+  }: {
+    userId: string;
+    role?: string | null;
+    data: UpsertAttendanceDto;
+  }) {
     this.assertUuid(userId, 'User Id');
     this.assertUuid(data.sessionId, 'sessionId');
     this.assertUuid(data.studentId, 'studentId');
 
-    const session = await this.sessionService.getSessionService({ userId, id: data.sessionId });
-    if (session.class?.tutorId !== userId) {
+    const session = await this.sessionService.getSessionService({
+      userId,
+      role,
+      id: data.sessionId,
+    });
+    if (!canActOnOwned({ userId, role }, session.class?.tutorId)) {
       throw new ForbiddenException(ERROR_MESSAGES.ATTENDANCE_MARK_NOT_ALLOWED);
     }
 
     const roster = await this.classService.getAllStudentsService({
       userId,
+      role,
       id: session.classId,
     });
     if (!roster.some((s) => s.id === data.studentId)) {

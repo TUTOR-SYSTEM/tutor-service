@@ -59,7 +59,15 @@ export class TuitionRepository {
     return this.findById(tuition.id);
   }
 
-  async findAll({ userId, query }: { userId: string; query: GetTuitionsQueryDto }) {
+  async findAll({
+    userId,
+    role,
+    query,
+  }: {
+    userId: string;
+    role?: string | null;
+    query: GetTuitionsQueryDto;
+  }) {
     const { page, limit, classId, studentId, status } = query;
     const where: Prisma.TuitionWhereInput = {
       AND: [this.canRead(userId), { classId, studentId, status }],

@@ -18,15 +18,20 @@ this is now an education / tutoring domain.)
 - **Service methods** are suffixed `...Service` (`createClassService`, `getClassesService`,
   `delClassService`) and take `{ userId, data | query | id }`; they validate the user and
   ownership before delegating to the repo.
-- **Curriculum content ownership**: `curriculum` update/delete require `curriculum.userId ===
-  userId`. `chapter` and `lesson` writes (create/update/delete) take a required `userId` in the
+- **Curriculum content ownership**: `curriculum` update/delete require `canActOnOwned` on
+  `curriculum.userId` (ADMIN bypasses). `chapter` and `lesson` writes (create/update/delete) take a required `userId` in the
   service/RPC payload and authorize through the parent curriculum (`CurriculumRepository` is
   provided in both modules); misses are `404`. A lesson update strips `curriculumId` so a lesson
   can't be moved to another curriculum. Gateway sends `userId` on those six patterns. Reads stay
   open (shared library) — confirm with the PO before restricting.
+- **Acting identity (CONTRACT C4)**: the gateway forwards `{ userId, role }` (from the verified JWT)
+  in every RPC payload; HTTP controllers pass `user.id` / `user.role`. Services take an optional
+  `role` and gate with `canActOnOwned({ userId, role }, ownerId)` from `@packages/helpers`, where
+  `ADMIN` bypasses ownership and a missing role is non-admin (fail closed). Use it for every owner
+  check instead of hand-written `tutorId === userId`.
 - **Class creation**: only `TUTOR`/`ADMIN` may create a class; a tutor can only create for
   themselves (`tutorId === userId`), only `ADMIN` may assign another tutor, and the assignee must
-  be a `TUTOR`/`ADMIN`. Every later owner check is `tutorId === userId`, so never relax this.
+  be a `TUTOR`/`ADMIN`.
 - **Exercise create**: `studentId !== tutorId`, and when a `sessionId` is given the `tutorId` must be
   that session's class tutor (otherwise a student could name themselves tutor and self-grade).
 - **Chat WebSocket**: `conversation:join` and `message:read` check `conversation_participants`;

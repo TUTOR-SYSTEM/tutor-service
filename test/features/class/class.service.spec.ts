@@ -212,6 +212,41 @@ describe('ClassService', () => {
     });
   });
 
+  describe('ADMIN ownership bypass', () => {
+    const OWNED = { id: CLASS_ID, tutorId: OTHER_TUTOR_ID, name: 'Old', code: 'C0' };
+
+    it('lets ADMIN update a class owned by another tutor', async () => {
+      repo.getClassByField.mockResolvedValue(OWNED);
+      repo.update.mockResolvedValue({ ...OWNED, subject: 'Math' });
+
+      await expect(
+        service.updateClassService({
+          userId: TUTOR_ID,
+          role: 'ADMIN',
+          id: CLASS_ID,
+          data: { subject: 'Math' } as never,
+        }),
+      ).resolves.toMatchObject({ subject: 'Math' });
+    });
+
+    it("still hides another tutor's class from a plain TUTOR on delete", async () => {
+      repo.getClassByField.mockResolvedValue(OWNED);
+
+      await expect(
+        service.delClassService({ userId: TUTOR_ID, role: 'TUTOR', id: CLASS_ID }),
+      ).rejects.toThrow(new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND));
+      expect(repo.delClass).not.toHaveBeenCalled();
+    });
+
+    it('lets ADMIN resolve the owner gate for schedules/sessions of any class', async () => {
+      repo.getClassByField.mockResolvedValue(OWNED);
+
+      await expect(
+        service.getOwnedClassService({ userId: TUTOR_ID, role: 'ADMIN', id: CLASS_ID }),
+      ).resolves.toEqual(OWNED);
+    });
+  });
+
   describe('updateClassService', () => {
     const existing = { id: CLASS_ID, tutorId: TUTOR_ID, name: 'Old', code: 'C0' };
 
