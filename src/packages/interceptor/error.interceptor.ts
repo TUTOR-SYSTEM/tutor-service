@@ -20,17 +20,23 @@ export class ErrorInterceptor implements NestInterceptor {
         string | undefined;
       switch (pgCode) {
         case '23503':
+        case 'P2003':
           return 'Referenced record not found (foreign key violation)';
         case '23505':
+        case 'P2002':
           return 'Record already exists (duplicate value)';
         case '23502':
+        case 'P2011':
           return 'Required field is missing (not-null violation)';
         case '23514':
           return 'Value violates check constraint';
       }
     }
     const message = error instanceof Error ? error.message : 'Internal server error';
-    return message.startsWith('Failed query:') ? 'Database error' : message;
+    // Prisma messages embed the failing invocation (model, arguments) — never send them out
+    return message.startsWith('Failed query:') || message.includes('`prisma.')
+      ? 'Database error'
+      : message;
   }
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {

@@ -7,7 +7,7 @@ this is now an education / tutoring domain.)
 
 - **Layers**: `{name}.controller.ts` → `{name}.service.ts` → `{name}.repository.ts`, plus
   `{name}.module.ts`. Controllers hold no business logic (they only read `@CurrentUser()` and
-  delegate); repositories hold all Drizzle access. Every owned feature (all but `chat`, which
+  delegate); repositories hold all Prisma access (`PrismaService`). Every owned feature (all but `chat`, which
   is realtime via `chat.gateway.ts`) also has a `{name}.rpc.controller.ts` —
   `@UseFilters(RpcExceptionFilter)` (`@packages/filters`), one
   `@MessagePattern('<feature>.<methodName>')` per gateway call, delegating to the *same*
@@ -64,10 +64,11 @@ this is now an education / tutoring domain.)
 - **Success responses**: use `ApiResponse` decorator from `@packages/decorators` for swagger
   metadata. Response body `message` can come from `SUCCESS_MESSAGES` or be inline depending on
   context.
-- **List query conditions**: `buildListWhereClause` from `@packages/helpers` is the standard
-  helper for search+filter list endpoints. For simple queries (≤2 filters), manual `and()`/`eq()`
-  in the repository is acceptable. The `searchableColumns`/`filterColumns` column config is
-  built *inside the repository* (it needs the Drizzle table object anyway) — the
+- **List query conditions**: `buildListWhereClause({ search, searchFields, filters })` from
+  `@packages/helpers` is the standard helper for search+filter list endpoints — it returns a Prisma
+  `where` object (`OR` of case-insensitive `contains` over `searchFields`, `AND` exact-match
+  `filters`) or `undefined`. For simple queries (≤2 filters), a hand-written `where` in the
+  repository is acceptable. `searchFields` is declared *inside the repository* — the
   service/controller only pass through `page`/`limit`/`search`/raw filter values from the query
   DTO, never an empty `{}` placeholder. See `ClassRepository.getClasses` or
   `CurriculumRepository.findAll` (search matches `subject` + `code`) as the reference. Also:

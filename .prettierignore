@@ -1,6 +1,6 @@
 dist
 coverage
 node_modules
-drizzle
+prisma/migrations
 *.log
 package-lock.json

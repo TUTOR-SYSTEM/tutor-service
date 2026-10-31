@@ -11,38 +11,9 @@
  * Optional: SEED_SUFFIX=<string> to avoid unique-constraint collisions on rerun (default: timestamp)
  */
 import 'dotenv/config';
-import { randomUUID } from 'node:crypto';
-import { eq } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/postgres-js';
-import postgres from 'postgres';
-import * as schema from '../src/database/schema';
-import {
-  users,
-  grades,
-  curriculums,
-  chapters,
-  lessons,
-  classes,
-  classStudents,
-  schedules,
-  sessions,
-  exercise,
-} from '../src/database/schema';
+import type { User } from '@prisma/client';
+import { createPrisma } from './lib/prisma';
 import { hashData } from '../src/packages/helpers/hashingData.helper';
-
-function resolveDatabaseUrl(): string {
-  const databaseUrl = process.env.DATABASE_URL?.trim();
-  if (databaseUrl) return databaseUrl;
-  const host = process.env.POSTGRES_HOST?.trim() || 'localhost';
-  const port = process.env.POSTGRES_PORT?.trim() || '5433';
-  const db = process.env.POSTGRES_DB?.trim() || 'backends_db';
-  const user = process.env.POSTGRES_USER?.trim() || 'postgres';
-  const password = process.env.POSTGRES_PASSWORD?.trim() || 'postgres';
-  const url = new URL(`postgres://${host}:${port}/${db}`);
-  url.username = user;
-  url.password = password;
-  return url.toString();
-}
 
 const suffix = (process.env.SEED_SUFFIX?.trim() || String(Date.now()).slice(-6)).toLowerCase();
 const SHARED_PASSWORD = 'Demo@123456';
@@ -70,33 +41,26 @@ const exerciseStatusValues = ['SUBMITTED', 'GRADED', 'RESUBMIT'] as const;
 
 async function main() {
   console.log('\n── Seeding curriculum demo data ──────────────────────────────\n');
-  const client = postgres(resolveDatabaseUrl());
-  const db = drizzle(client, { schema });
+  const prisma = createPrisma();
 
   // ── 1. Grade ──────────────────────────────────────────────────────
-  let [grade] = await db.select().from(grades).where(eq(grades.level, 10)).limit(1);
-  if (!grade) {
-    [grade] = await db
-      .insert(grades)
-      .values({ id: randomUUID(), name: 'Lớp 10', level: 10 })
-      .returning();
-  }
+  const grade =
+    (await prisma.grade.findUnique({ where: { level: 10 } })) ??
+    (await prisma.grade.create({ data: { name: 'Lớp 10', level: 10 } }));
   log('grade', grade.id);
 
   // ── 2. Tutor: reuse existing account by default so data shows up under
   //    the login you already use (set SEED_TUTOR_EMAIL to override / empty to force a new demo tutor)
   const tutorEmail = process.env.SEED_TUTOR_EMAIL?.trim() ?? 'dang04223@gmail.com';
-  let tutor: typeof users.$inferSelect | undefined;
+  let tutor: User | null = null;
   if (tutorEmail) {
-    [tutor] = await db.select().from(users).where(eq(users.email, tutorEmail)).limit(1);
+    tutor = await prisma.user.findUnique({ where: { email: tutorEmail } });
     if (!tutor) console.log(`(SEED_TUTOR_EMAIL "${tutorEmail}" not found — creating new demo tutor)`);
   }
   if (!tutor) {
     const tutorPassword = await hashData(SHARED_PASSWORD);
-    [tutor] = await db
-      .insert(users)
-      .values({
-        id: randomUUID(),
+    tutor = await prisma.user.create({
+      data: {
         email: `tutor.${suffix}@demo.dev`,
         username: `tutor${suffix}`,
         firstName: 'Minh',
@@ -104,8 +68,8 @@ async function main() {
         password: tutorPassword,
         role: 'TUTOR',
         isActive: true,
-      })
-      .returning();
+      },
+    });
   }
   log('tutor', tutor.id);
 
@@ -115,11 +79,8 @@ async function main() {
     { firstName: 'Hùng', lastName: 'Trần' },
     { firstName: 'Lan', lastName: 'Phạm' },
   ];
-  const parentRows = await db
-    .insert(users)
-    .values(
-      parentNames.map((p, i) => ({
-        id: randomUUID(),
+  const parentRows = await prisma.user.createManyAndReturn({
+    data: parentNames.map((p, i) => ({
         email: `parent${i + 1}.${suffix}@demo.dev`,
         username: `parent${i + 1}${suffix}`,
         firstName: p.firstName,
@@ -129,8 +90,7 @@ async function main() {
         relationship: i === 0 ? 'Bố' : 'Mẹ',
         isActive: true,
       })),
-    )
-    .returning();
+  });
   parentRows.forEach((p, i) => log(`parent ${i + 1}`, p.id));
 
   // ── 4. Students (2 con / phụ huynh) ──────────────────────────────
@@ -141,11 +101,8 @@ async function main() {
     { firstName: 'Chi', lastName: 'Phạm' },
     { firstName: 'Dũng', lastName: 'Phạm' },
   ];
-  const studentRows = await db
-    .insert(users)
-    .values(
-      studentNames.map((s, i) => ({
-        id: randomUUID(),
+  const studentRows = await prisma.user.createManyAndReturn({
+    data: studentNames.map((s, i) => ({
         email: `student${i + 1}.${suffix}@demo.dev`,
         username: `student${i + 1}${suffix}`,
         firstName: s.firstName,
@@ -158,16 +115,13 @@ async function main() {
         gradesId: [grade.id],
         isActive: true,
       })),
-    )
-    .returning();
+  });
   studentRows.forEach((s, i) => log(`student ${i + 1}`, s.id));
   const studentIds = studentRows.map((s) => s.id);
 
   // ── 5. Curriculum ─────────────────────────────────────────────────
-  const [curriculum] = await db
-    .insert(curriculums)
-    .values({
-      id: randomUUID(),
+  const curriculum = await prisma.curriculum.create({
+    data: {
       userId: tutor.id,
       gradesId: grade.id,
       subject: 'Toán lớp 10',
@@ -175,8 +129,8 @@ async function main() {
       grade: '10',
       courseTime: '3 tháng',
       description: 'Chương trình Toán lớp 10 - Học kỳ demo 3 tháng',
-    })
-    .returning();
+    },
+  });
   log('curriculum', curriculum.id);
 
   // ── 6. Chapters + Lessons (3 chương × 3 bài, mỗi bài 1 lý thuyết + 2 bài tập) ──
@@ -193,32 +147,24 @@ async function main() {
 
   const allLessons: { id: string; theoryUrls: FileRef[]; exerciseUrls: FileRef[] }[] = [];
   for (let c = 0; c < chapterTitles.length; c++) {
-    const [chapter] = await db
-      .insert(chapters)
-      .values({
-        id: randomUUID(),
-        curriculumId: curriculum.id,
-        title: chapterTitles[c],
-        order: c + 1,
-      })
-      .returning();
+    const chapter = await prisma.chapter.create({
+      data: { curriculumId: curriculum.id, title: chapterTitles[c], order: c + 1 },
+    });
     log(`chapter ${c + 1}`, chapter.id);
 
     for (let l = 0; l < lessonTitlesByChapter[c].length; l++) {
       const theoryUrls = [file('ly-thuyet', c + 1, l + 1)];
       const exerciseUrls = [file('bai-tap-1', c + 1, l + 1), file('bai-tap-2', c + 1, l + 1)];
-      const [lesson] = await db
-        .insert(lessons)
-        .values({
-          id: randomUUID(),
+      const lesson = await prisma.lesson.create({
+        data: {
           curriculumId: curriculum.id,
           chapterId: chapter.id,
           title: lessonTitlesByChapter[c][l],
           theoryUrls,
           exerciseUrls,
           order: l + 1,
-        })
-        .returning();
+        },
+      });
       log(`  lesson ${c + 1}.${l + 1}`, lesson.id);
       allLessons.push({ id: lesson.id, theoryUrls, exerciseUrls });
     }
@@ -229,10 +175,8 @@ async function main() {
   const classStart = addDays(today, -45);
   const classEnd = addDays(today, 45);
 
-  const [cls] = await db
-    .insert(classes)
-    .values({
-      id: randomUUID(),
+  const cls = await prisma.class.create({
+    data: {
       name: `Lớp Toán 10A - ${suffix}`,
       code: `L10A${suffix}`.slice(0, 20).toUpperCase(),
       subject: 'Toán',
@@ -241,40 +185,23 @@ async function main() {
       startTime: classStart,
       endTime: classEnd,
       curriculumId: curriculum.id,
-      studentsId: studentIds,
       tutorId: tutor.id,
       status: 'OPEN',
-    })
-    .returning();
+    },
+  });
   log('class', cls.id);
 
-  await db.insert(classStudents).values(
-    studentIds.map((studentId) => ({
-      id: randomUUID(),
-      classId: cls.id,
-      studentId,
-    })),
-  );
+  await prisma.classStudent.createMany({
+    data: studentIds.map((studentId) => ({ classId: cls.id, studentId })),
+  });
 
   // ── 8. Schedule: học Thứ 3 & Thứ 5, 18:00-19:30 ──────────────────
-  await db.insert(schedules).values([
-    {
-      id: randomUUID(),
-      classId: cls.id,
-      dayOfWeek: 'TUESDAY',
-      startTime: '18:00',
-      endTime: '19:30',
-      format: 'ONLINE',
-    },
-    {
-      id: randomUUID(),
-      classId: cls.id,
-      dayOfWeek: 'THURSDAY',
-      startTime: '18:00',
-      endTime: '19:30',
-      format: 'ONLINE',
-    },
-  ]);
+  await prisma.schedule.createMany({
+    data: [
+      { classId: cls.id, dayOfWeek: 'TUESDAY', startTime: '18:00', endTime: '19:30', format: 'ONLINE' },
+      { classId: cls.id, dayOfWeek: 'THURSDAY', startTime: '18:00', endTime: '19:30', format: 'ONLINE' },
+    ],
+  });
   log('schedule', cls.id);
 
   // ── 9. Sessions: mỗi Thứ 3 & Thứ 5 trong khoảng 3 tháng ──────────
@@ -313,10 +240,8 @@ async function main() {
     if (isPast) completedCount++;
     else scheduledCount++;
 
-    const [session] = await db
-      .insert(sessions)
-      .values({
-        id: randomUUID(),
+    const session = await prisma.classSession.create({
+      data: {
         classId: cls.id,
         lessonId: lesson.id,
         tutorId: tutor.id,
@@ -329,8 +254,8 @@ async function main() {
         status,
         actualStartAt: isPast ? startAt : null,
         actualEndAt: isPast ? endAt : null,
-      })
-      .returning();
+      },
+    });
 
     if (isPast) {
       for (const studentId of studentIds) {
@@ -340,8 +265,8 @@ async function main() {
         const exStatus: (typeof exerciseStatusValues)[number] =
           roll < 0.65 ? 'GRADED' : roll < 0.85 ? 'SUBMITTED' : 'RESUBMIT';
 
-        await db.insert(exercise).values({
-          id: randomUUID(),
+        await prisma.exercise.create({
+          data: {
           lessonId: lesson.id,
           sessionId: session.id,
           tutorId: tutor.id,
@@ -366,6 +291,7 @@ async function main() {
                 ? commentPoolResubmit[Math.floor(Math.random() * commentPoolResubmit.length)]
                 : null,
           gradedAt: exStatus === 'GRADED' ? addDays(startAt, 1) : null,
+          },
         });
         exerciseCount++;
       }
@@ -383,7 +309,7 @@ async function main() {
   console.log(`Tutor account used: ${tutor.email} (id = ${tutor.id})`);
   console.log(`Class id: ${cls.id} · Curriculum id: ${curriculum.id}`);
 
-  await client.end({ timeout: 5 });
+  await prisma.$disconnect();
 }
 
 main().catch((err) => {

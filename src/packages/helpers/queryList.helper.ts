@@ -1,72 +1,40 @@
-import { and, eq, ilike, or, type SQL, type SQLWrapper } from 'drizzle-orm';
-
-type SearchableColumn = {
-  column: SQLWrapper;
-};
-
-type FilterableColumn<TValue> = {
-  column: SQLWrapper;
-  transform?: (value: TValue) => TFilterComparable;
-};
-
-type TFilterComparable = string | number | boolean | Date;
-
-export type BuildListWhereClauseParams<
-  TSearchField extends string,
-  TFilterField extends string,
-  TFilterValue,
-> = {
-  search?: string;
-  searchableColumns?: Partial<Record<TSearchField, SearchableColumn>>;
-  filters?: Partial<Record<TFilterField, TFilterValue | null | undefined>>;
-  filterColumns?: Partial<Record<TFilterField, FilterableColumn<TFilterValue>>>;
-};
-
 /**
- * Build where-clause for list API:
- * - `search`: OR across configured searchable columns (ILIKE)
- * - `filters`: AND exact-match conditions (EQ), skipping undefined/null
+ * Build the `where` object for a list API (Prisma):
+ * - `search`: OR across `searchFields` (case-insensitive `contains`)
+ * - `filters`: AND exact-match conditions, skipping undefined/null
+ * Returns `undefined` when there is nothing to filter on.
  */
-export function buildListWhereClause<
-  TSearchField extends string,
-  TFilterField extends string,
-  TFilterValue,
->({
+export type BuildListWhereParams<TFilterField extends string, TFilterValue> = {
+  search?: string;
+  searchFields?: readonly string[];
+  filters?: Partial<Record<TFilterField, TFilterValue | null | undefined>>;
+};
+
+export function buildListWhereClause<TFilterField extends string, TFilterValue>({
   search,
-  searchableColumns,
+  searchFields = [],
   filters,
-  filterColumns,
-}: BuildListWhereClauseParams<TSearchField, TFilterField, TFilterValue>): SQL | undefined {
-  const conditions: SQL[] = [];
+}: BuildListWhereParams<TFilterField, TFilterValue>): Record<string, unknown> | undefined {
+  const conditions: Record<string, unknown>[] = [];
 
-  if (search?.trim()) {
-    const pattern = `%${search.trim()}%`;
-    const searchConditions = (Object.values(searchableColumns ?? {}) as SearchableColumn[])
-      .map((item) => (item ? ilike(item.column as never, pattern) : undefined))
-      .filter((condition): condition is SQL => condition !== undefined);
-
-    if (searchConditions.length > 0) {
-      const searchCondition = or(...searchConditions);
-      if (searchCondition) {
-        conditions.push(searchCondition);
-      }
-    }
+  const term = search?.trim();
+  if (term && searchFields.length > 0) {
+    conditions.push({
+      OR: searchFields.map((field) => ({ [field]: { contains: term, mode: 'insensitive' } })),
+    });
   }
 
   for (const [field, value] of Object.entries(filters ?? {})) {
     if (value === undefined || value === null) continue;
-
-    const item = filterColumns?.[field as TFilterField];
-    if (item) {
-      const normalizedValue = item.transform
-        ? item.transform(value as TFilterValue)
-        : (value as TFilterValue);
-      conditions.push(eq(item.column as never, normalizedValue));
-    }
+    conditions.push({ [field]: value });
   }
 
   if (conditions.length === 0) return undefined;
   if (conditions.length === 1) return conditions[0];
+  return { AND: conditions };
+}
 
-  return and(...conditions);
+/** Standard `{ total, page, limit, totalPages }` block returned by every list endpoint. */
+export function buildPagination(total: number, page: number, limit: number) {
+  return { total, page, limit, totalPages: Math.ceil(total / limit) };
 }

@@ -1,14 +1,12 @@
-import { Inject, Injectable } from '@nestjs/common';
-import { DRIZZLE } from 'src/database/database.module';
-import { drizzle } from 'drizzle-orm/postgres-js';
-import { v4 as uuidv4 } from 'uuid';
+import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import { PrismaService, isRecordNotFound } from '../../database/prisma.service';
 import { type CreateLessonBodyDto, type UpdateLessonDto } from '@packages/entities';
-import { chapters, lessons } from 'src/database/schema';
-import { and, count, eq } from 'drizzle-orm';
+import { buildPagination } from '@packages/helpers';
 
 @Injectable()
 export class LessonRepository {
-  constructor(@Inject(DRIZZLE) private readonly db: ReturnType<typeof drizzle>) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async create({
     curriculumId,
@@ -19,10 +17,8 @@ export class LessonRepository {
     chapterId?: string | null;
     data: CreateLessonBodyDto;
   }) {
-    const [lesson] = await this.db
-      .insert(lessons)
-      .values({
-        id: uuidv4(),
+    return this.prisma.lesson.create({
+      data: {
         curriculumId,
         chapterId: chapterId ?? null,
         title: data.title,
@@ -30,9 +26,8 @@ export class LessonRepository {
         theoryUrls: data.theoryUrls ?? [],
         exerciseUrls: data.exerciseUrls ?? [],
         order: data.order ?? 0,
-      })
-      .returning();
-    return lesson;
+      },
+    });
   }
 
   async findAll({
@@ -46,41 +41,26 @@ export class LessonRepository {
     page?: number;
     limit?: number;
   }) {
-    const conditions = [eq(lessons.curriculumId, curriculumId)];
-    if (chapterId) {
-      conditions.push(eq(lessons.chapterId, chapterId));
-    }
-    const whereClause = and(...conditions);
-
-    const [totalRow] = await this.db.select({ total: count() }).from(lessons).where(whereClause);
-    const total = Number(totalRow?.total ?? 0);
+    const where: Prisma.LessonWhereInput = { curriculumId, ...(chapterId && { chapterId }) };
     const pageNumber = Number(page);
     const limitNumber = Number(limit);
-    const offset = (pageNumber - 1) * limitNumber;
 
-    const rows = await this.db
-      .select()
-      .from(lessons)
-      .where(whereClause)
-      // stable order — without it OFFSET pagination can repeat/skip rows between pages
-      .orderBy(lessons.order, lessons.id)
-      .limit(limitNumber)
-      .offset(offset);
+    const [total, rows] = await Promise.all([
+      this.prisma.lesson.count({ where }),
+      this.prisma.lesson.findMany({
+        where,
+        // stable order — without it OFFSET pagination can repeat/skip rows between pages
+        orderBy: [{ order: 'asc' }, { id: 'asc' }],
+        take: limitNumber,
+        skip: (pageNumber - 1) * limitNumber,
+      }),
+    ]);
 
-    return {
-      lessons: rows,
-      pagination: {
-        total,
-        page: pageNumber,
-        limit: limitNumber,
-        totalPages: Math.ceil(total / limitNumber),
-      },
-    };
+    return { lessons: rows, pagination: buildPagination(total, pageNumber, limitNumber) };
   }
 
   async findById(id: string) {
-    const [lesson] = await this.db.select().from(lessons).where(eq(lessons.id, id)).limit(1);
-    return lesson ?? null;
+    return this.prisma.lesson.findUnique({ where: { id } });
   }
 
   // true when the chapter exists and belongs to the given curriculum
@@ -100,12 +80,16 @@ export class LessonRepository {
   }
 
   async update(id: string, data: UpdateLessonDto) {
-    const [lesson] = await this.db.update(lessons).set(data).where(eq(lessons.id, id)).returning();
-    return lesson ?? null;
+    try {
+      return await this.prisma.lesson.update({ where: { id }, data });
+    } catch (error) {
+      if (isRecordNotFound(error)) return null;
+      throw error;
+    }
   }
 
   async delete(id: string) {
-    const [lesson] = await this.db.delete(lessons).where(eq(lessons.id, id)).returning();
-    return !!lesson;
+    const { count } = await this.prisma.lesson.deleteMany({ where: { id } });
+    return count > 0;
   }
 }

@@ -20,7 +20,7 @@ process.stdin.on('end', () => {
 
   // Only touch source files; skip generated / vendored dirs.
   if (!/\.(ts|tsx|js|mjs|cjs)$/.test(norm)) process.exit(0);
-  if (/(^|\/)(drizzle|node_modules|dist)\//.test(norm)) process.exit(0);
+  if (/(^|\/)(prisma|node_modules|dist)\//.test(norm)) process.exit(0);
   if (!existsSync(file)) process.exit(0);
 
   const bin = (name) =>

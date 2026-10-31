@@ -1,20 +1,6 @@
-import { Inject, Injectable } from '@nestjs/common';
-import {
-  and,
-  countDistinct,
-  eq,
-  gte,
-  gt,
-  inArray,
-  lt,
-  lte,
-  sql,
-  type AnyColumn,
-  type SQLWrapper,
-} from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/postgres-js';
-import { DRIZZLE } from '../../database/database.module';
-import { classStudents, classes, sessions, tuitions } from 'src/database/schema';
+import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import { PrismaService } from '../../database/prisma.service';
 
 export interface TodayScheduleRow {
   id: string;
@@ -36,8 +22,8 @@ export interface MonthlyRow {
   cumulativeRevenue: number;
 }
 
-/** Drizzle subquery selecting class ids; usable as the right side of `inArray`. */
-export type ClassScope = SQLWrapper;
+/** SQL fragment selecting class ids; embedded as the right side of `IN (...)`. */
+export type ClassScope = Prisma.Sql;
 
 type RawScheduleRow = Omit<TodayScheduleRow, 'startAt' | 'endAt'> & {
   startAt: Date | string;
@@ -58,45 +44,39 @@ const toScheduleRow = (r: RawScheduleRow): TodayScheduleRow => ({
 });
 
 /** [Jan 1, next Jan 1) bounds on a column — lets Postgres use an index, unlike extract(year). */
-const yearRange = (column: AnyColumn, year: number) => [
-  gte(column, new Date(year, 0, 1)),
-  lt(column, new Date(year + 1, 0, 1)),
-];
+const yearRange = (column: Prisma.Sql, year: number) =>
+  Prisma.sql`${column} >= ${new Date(year, 0, 1)} AND ${column} < ${new Date(year + 1, 0, 1)}`;
 
+const monthMap = (rows: { month: number; total: number }[]) =>
+  new Map(rows.map((r) => [Number(r.month), Number(r.total)]));
+
+// The dashboard is a set of aggregate reports scoped by a class-id subquery, so it stays on
+// parameterised raw SQL (every interpolation below is a bound parameter, never string-built).
 @Injectable()
 export class DashboardRepository {
-  constructor(
-    @Inject(DRIZZLE)
-    private readonly db: ReturnType<typeof drizzle>,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   /** Subquery of class ids owned by the tutor (embedded in `IN (...)`, no id round trip). */
   tutorClassScope(userId: string): ClassScope {
-    return this.db.select({ id: classes.id }).from(classes).where(eq(classes.tutorId, userId));
+    return Prisma.sql`SELECT id FROM classes WHERE tutor_id = ${userId}::uuid`;
   }
 
   /** Subquery of class ids the student is enrolled in. */
   studentClassScope(userId: string): ClassScope {
-    return this.db
-      .select({ id: classStudents.classId })
-      .from(classStudents)
-      .where(eq(classStudents.studentId, userId));
+    return Prisma.sql`SELECT class_id FROM class_students WHERE student_id = ${userId}::uuid`;
   }
 
   async countClasses(scope: ClassScope): Promise<number> {
-    const [row] = await this.db
-      .select({ total: sql<number>`count(*)::int` })
-      .from(classes)
-      .where(inArray(classes.id, scope));
+    const [row] = await this.prisma.$queryRaw<{ total: number }[]>`
+      SELECT count(*)::int AS total FROM classes WHERE id IN (${scope})`;
     return Number(row?.total ?? 0);
   }
 
   /** Distinct students enrolled across the given classes. */
   async countStudents(scope: ClassScope): Promise<number> {
-    const [row] = await this.db
-      .select({ total: countDistinct(classStudents.studentId) })
-      .from(classStudents)
-      .where(inArray(classStudents.classId, scope));
+    const [row] = await this.prisma.$queryRaw<{ total: number }[]>`
+      SELECT count(DISTINCT student_id)::int AS total
+      FROM class_students WHERE class_id IN (${scope})`;
     return Number(row?.total ?? 0);
   }
 
@@ -109,22 +89,22 @@ export class DashboardRepository {
     week: { from: Date; to: Date },
     day: { from: Date; to: Date },
   ): Promise<{ total: number; completed: number; todayCompleted: number; todayPending: number }> {
-    const today = and(gte(sessions.startAt, day.from), lte(sessions.startAt, day.to));
-    const [row] = await this.db
-      .select({
-        total: sql<number>`count(*)::int`,
-        completed: sql<number>`count(*) filter (where ${sessions.status} = 'COMPLETED')::int`,
-        todayCompleted: sql<number>`count(*) filter (where ${sessions.status} = 'COMPLETED' and ${today})::int`,
-        todayPending: sql<number>`count(*) filter (where ${sessions.status} not in ('COMPLETED', 'CANCELLED') and ${today})::int`,
-      })
-      .from(sessions)
-      .where(
-        and(
-          inArray(sessions.classId, scope),
-          gte(sessions.startAt, week.from),
-          lte(sessions.startAt, week.to),
-        ),
-      );
+    const today = Prisma.sql`start_at >= ${day.from} AND start_at <= ${day.to}`;
+    const [row] = await this.prisma.$queryRaw<
+      {
+        total: number;
+        completed: number;
+        todayCompleted: number;
+        todayPending: number;
+      }[]
+    >`
+      SELECT
+        count(*)::int AS "total",
+        (count(*) FILTER (WHERE status = 'COMPLETED'))::int AS "completed",
+        (count(*) FILTER (WHERE status = 'COMPLETED' AND ${today}))::int AS "todayCompleted",
+        (count(*) FILTER (WHERE status NOT IN ('COMPLETED', 'CANCELLED') AND ${today}))::int AS "todayPending"
+      FROM class_sessions
+      WHERE class_id IN (${scope}) AND start_at >= ${week.from} AND start_at <= ${week.to}`;
     return {
       total: Number(row?.total ?? 0),
       completed: Number(row?.completed ?? 0),
@@ -135,28 +115,13 @@ export class DashboardRepository {
 
   /** Sessions scheduled within [from, to], with class info, ordered by start time. */
   async getSchedule(scope: ClassScope, from: Date, to: Date): Promise<TodayScheduleRow[]> {
-    const rows = await this.db
-      .select({
-        id: sessions.id,
-        startAt: sessions.startAt,
-        endAt: sessions.endAt,
-        title: sessions.title,
-        location: sessions.location,
-        className: classes.name,
-        subject: classes.subject,
-        format: classes.format,
-      })
-      .from(sessions)
-      .innerJoin(classes, eq(classes.id, sessions.classId))
-      .where(
-        and(
-          inArray(sessions.classId, scope),
-          gte(sessions.startAt, from),
-          lte(sessions.startAt, to),
-        ),
-      )
-      .orderBy(sessions.startAt);
-
+    const rows = await this.prisma.$queryRaw<RawScheduleRow[]>`
+      SELECT s.id, s.start_at AS "startAt", s.end_at AS "endAt", s.title, s.location,
+             c.name AS "className", c.subject, c.format::text AS format
+      FROM class_sessions s
+      INNER JOIN classes c ON c.id = s.class_id
+      WHERE s.class_id IN (${scope}) AND s.start_at >= ${from} AND s.start_at <= ${to}
+      ORDER BY s.start_at`;
     return rows.map(toScheduleRow);
   }
 
@@ -166,78 +131,46 @@ export class DashboardRepository {
     after: Date,
     limit: number,
   ): Promise<TodayScheduleRow[]> {
-    const rows = await this.db
-      .select({
-        id: sessions.id,
-        startAt: sessions.startAt,
-        endAt: sessions.endAt,
-        title: sessions.title,
-        location: sessions.location,
-        className: classes.name,
-        subject: classes.subject,
-        format: classes.format,
-      })
-      .from(sessions)
-      .innerJoin(classes, eq(classes.id, sessions.classId))
-      .where(
-        and(
-          inArray(sessions.classId, scope),
-          gt(sessions.startAt, after),
-          sql`${sessions.status} != 'COMPLETED'`,
-          sql`${sessions.status} != 'CANCELLED'`,
-        ),
-      )
-      .orderBy(sessions.startAt)
-      .limit(limit);
-
+    const rows = await this.prisma.$queryRaw<RawScheduleRow[]>`
+      SELECT s.id, s.start_at AS "startAt", s.end_at AS "endAt", s.title, s.location,
+             c.name AS "className", c.subject, c.format::text AS format
+      FROM class_sessions s
+      INNER JOIN classes c ON c.id = s.class_id
+      WHERE s.class_id IN (${scope}) AND s.start_at > ${after}
+        AND s.status != 'COMPLETED' AND s.status != 'CANCELLED'
+      ORDER BY s.start_at
+      LIMIT ${limit}`;
     return rows.map(toScheduleRow);
   }
 
   /** Per-month newly enrolled students (class_students.createdAt) for a year. */
   async getNewStudentsByMonth(scope: ClassScope, year: number): Promise<Map<number, number>> {
-    const map = new Map<number, number>();
-    const rows = await this.db
-      .select({
-        month: sql<number>`extract(month from ${classStudents.createdAt})::int`,
-        total: sql<number>`count(distinct ${classStudents.studentId})::int`,
-      })
-      .from(classStudents)
-      .where(
-        and(inArray(classStudents.classId, scope), ...yearRange(classStudents.createdAt, year)),
-      )
-      .groupBy(sql`extract(month from ${classStudents.createdAt})`);
-    for (const r of rows) map.set(Number(r.month), Number(r.total));
-    return map;
+    const rows = await this.prisma.$queryRaw<{ month: number; total: number }[]>`
+      SELECT extract(month FROM created_at)::int AS month,
+             count(DISTINCT student_id)::int AS total
+      FROM class_students
+      WHERE class_id IN (${scope}) AND ${yearRange(Prisma.sql`created_at`, year)}
+      GROUP BY extract(month FROM created_at)`;
+    return monthMap(rows);
   }
 
   /** Per-month newly created classes for a year. */
   async getNewClassesByMonth(scope: ClassScope, year: number): Promise<Map<number, number>> {
-    const map = new Map<number, number>();
-    const rows = await this.db
-      .select({
-        month: sql<number>`extract(month from ${classes.createdAt})::int`,
-        total: sql<number>`count(*)::int`,
-      })
-      .from(classes)
-      .where(and(inArray(classes.id, scope), ...yearRange(classes.createdAt, year)))
-      .groupBy(sql`extract(month from ${classes.createdAt})`);
-    for (const r of rows) map.set(Number(r.month), Number(r.total));
-    return map;
+    const rows = await this.prisma.$queryRaw<{ month: number; total: number }[]>`
+      SELECT extract(month FROM created_at)::int AS month, count(*)::int AS total
+      FROM classes
+      WHERE id IN (${scope}) AND ${yearRange(Prisma.sql`created_at`, year)}
+      GROUP BY extract(month FROM created_at)`;
+    return monthMap(rows);
   }
 
   /** Tuition revenue (PAID) within [from, to] for the given classes. */
   async getRevenue(scope: ClassScope, from: Date, to: Date): Promise<number> {
-    const [row] = await this.db
-      .select({ total: sql<string>`coalesce(sum(${tuitions.amount}), 0)` })
-      .from(tuitions)
-      .where(
-        and(
-          inArray(tuitions.classId, scope),
-          eq(tuitions.status, 'PAID'),
-          gte(tuitions.paidDate, from),
-          lte(tuitions.paidDate, to),
-        ),
-      );
+    const [row] = await this.prisma.$queryRaw<{ total: number }[]>`
+      SELECT coalesce(sum(amount), 0)::float8 AS total
+      FROM tuitions
+      WHERE class_id IN (${scope}) AND status = 'PAID'
+        AND paid_date >= ${from} AND paid_date <= ${to}`;
     return Number(row?.total ?? 0);
   }
 
@@ -246,20 +179,14 @@ export class DashboardRepository {
     scope: ClassScope,
     studentId?: string,
   ): Promise<Record<'OVERDUE' | 'UNPAID', { total: number; count: number }>> {
-    const conditions = [
-      inArray(tuitions.classId, scope),
-      inArray(tuitions.status, ['OVERDUE', 'UNPAID']),
-    ];
-    if (studentId) conditions.push(eq(tuitions.studentId, studentId));
-    const rows = await this.db
-      .select({
-        status: tuitions.status,
-        total: sql<string>`coalesce(sum(${tuitions.amount}), 0)`,
-        count: sql<number>`count(*)::int`,
-      })
-      .from(tuitions)
-      .where(and(...conditions))
-      .groupBy(tuitions.status);
+    const studentFilter = studentId
+      ? Prisma.sql`AND student_id = ${studentId}::uuid`
+      : Prisma.empty;
+    const rows = await this.prisma.$queryRaw<{ status: string; total: number; count: number }[]>`
+      SELECT status::text AS status, coalesce(sum(amount), 0)::float8 AS total, count(*)::int AS count
+      FROM tuitions
+      WHERE class_id IN (${scope}) AND status IN ('OVERDUE', 'UNPAID') ${studentFilter}
+      GROUP BY status`;
     const out = { OVERDUE: { total: 0, count: 0 }, UNPAID: { total: 0, count: 0 } };
     for (const r of rows) {
       if (r.status === 'OVERDUE' || r.status === 'UNPAID')
@@ -270,37 +197,22 @@ export class DashboardRepository {
 
   /** Per-month PAID revenue for a year. */
   async getMonthlyRevenue(scope: ClassScope, year: number): Promise<Map<number, number>> {
-    const map = new Map<number, number>();
-    const rows = await this.db
-      .select({
-        month: sql<number>`extract(month from ${tuitions.paidDate})::int`,
-        total: sql<string>`coalesce(sum(${tuitions.amount}), 0)`,
-      })
-      .from(tuitions)
-      .where(
-        and(
-          inArray(tuitions.classId, scope),
-          eq(tuitions.status, 'PAID'),
-          ...yearRange(tuitions.paidDate, year),
-        ),
-      )
-      .groupBy(sql`extract(month from ${tuitions.paidDate})`);
-    for (const r of rows) map.set(Number(r.month), Number(r.total));
-    return map;
+    const rows = await this.prisma.$queryRaw<{ month: number; total: number }[]>`
+      SELECT extract(month FROM paid_date)::int AS month,
+             coalesce(sum(amount), 0)::float8 AS total
+      FROM tuitions
+      WHERE class_id IN (${scope}) AND status = 'PAID' AND ${yearRange(Prisma.sql`paid_date`, year)}
+      GROUP BY extract(month FROM paid_date)`;
+    return monthMap(rows);
   }
 
   /** Per-month session counts for a year. */
   async getMonthlySessions(scope: ClassScope, year: number): Promise<Map<number, number>> {
-    const map = new Map<number, number>();
-    const rows = await this.db
-      .select({
-        month: sql<number>`extract(month from ${sessions.startAt})::int`,
-        total: sql<number>`count(*)::int`,
-      })
-      .from(sessions)
-      .where(and(inArray(sessions.classId, scope), ...yearRange(sessions.startAt, year)))
-      .groupBy(sql`extract(month from ${sessions.startAt})`);
-    for (const r of rows) map.set(Number(r.month), Number(r.total));
-    return map;
+    const rows = await this.prisma.$queryRaw<{ month: number; total: number }[]>`
+      SELECT extract(month FROM start_at)::int AS month, count(*)::int AS total
+      FROM class_sessions
+      WHERE class_id IN (${scope}) AND ${yearRange(Prisma.sql`start_at`, year)}
+      GROUP BY extract(month FROM start_at)`;
+    return monthMap(rows);
   }
 }

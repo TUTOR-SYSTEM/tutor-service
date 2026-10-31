@@ -1,27 +1,21 @@
-import { Inject, Injectable } from '@nestjs/common';
-import { DRIZZLE } from 'src/database/database.module';
-import { drizzle } from 'drizzle-orm/postgres-js';
-import { v4 as uuidv4 } from 'uuid';
+import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import { PrismaService, isRecordNotFound } from '../../database/prisma.service';
 import { type CreateCurriculumDto, UpdateCurriculumDto } from '@packages/entities';
-import { chapters, curriculums, lessons } from 'src/database/schema';
-import { buildListWhereClause } from '@packages/helpers';
-import { asc, count, desc, eq, getTableColumns, sql } from 'drizzle-orm';
+import { buildListWhereClause, buildPagination } from '@packages/helpers';
 
 @Injectable()
 export class CurriculumRepository {
-  constructor(@Inject(DRIZZLE) private readonly db: ReturnType<typeof drizzle>) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async findByCode(code: string) {
-    const [curriculum] = await this.db.select().from(curriculums).where(eq(curriculums.code, code));
-    return curriculum ?? null;
+    return this.prisma.curriculum.findFirst({ where: { code } });
   }
 
   async create({ userId, data }: { userId: string; data: CreateCurriculumDto }) {
     const { subject, code, grade, description, courseTime } = data;
-    const [curriculum] = await this.db
-      .insert(curriculums)
-      .values({
-        id: uuidv4(),
+    return this.prisma.curriculum.create({
+      data: {
         userId,
         code,
         grade: String(grade),
@@ -29,9 +23,8 @@ export class CurriculumRepository {
         gradesId: null,
         courseTime,
         description: description ?? null,
-      })
-      .returning();
-    return curriculum;
+      },
+    });
   }
 
   async findAll({
@@ -43,106 +36,46 @@ export class CurriculumRepository {
     limit?: number;
     search?: string;
   }) {
-    const whereClause = buildListWhereClause({
+    const where = buildListWhereClause({
       search,
-      searchableColumns: {
-        subject: { column: curriculums.subject },
-        code: { column: curriculums.code },
-      },
-    });
+      searchFields: ['subject', 'code'],
+    }) as Prisma.CurriculumWhereInput | undefined;
 
-    const [totalRow] = await this.db
-      .select({ total: count() })
-      .from(curriculums)
-      .where(whereClause);
-    const total = Number(totalRow?.total ?? 0);
     const pageNumber = Number(page);
     const limitNumber = Number(limit);
-    const offset = (pageNumber - 1) * limitNumber;
 
-    const rows = await this.db
-      .select({ ...getTableColumns(curriculums) })
-      .from(curriculums)
-      .where(whereClause)
-      .orderBy(desc(curriculums.createdAt), curriculums.id)
-      .limit(limitNumber)
-      .offset(offset);
-
-    if (rows.length === 0) {
-      return {
-        curriculums: [],
-        pagination: {
-          total,
-          page: pageNumber,
-          limit: limitNumber,
-          totalPages: Math.ceil(total / limitNumber),
-        },
-      };
-    }
-
-    const curriculumIds = rows.map((r) => r.id);
-
-    const [chapterCounts, lessonCounts] = await Promise.all([
-      this.db
-        .select({
-          curriculumId: chapters.curriculumId,
-          count: count(),
-        })
-        .from(chapters)
-        .where(sql`${chapters.curriculumId} IN ${curriculumIds}`)
-        .groupBy(chapters.curriculumId),
-      this.db
-        .select({
-          curriculumId: lessons.curriculumId,
-          count: count(),
-        })
-        .from(lessons)
-        .where(sql`${lessons.curriculumId} IN ${curriculumIds}`)
-        .groupBy(lessons.curriculumId),
+    const [total, rows] = await Promise.all([
+      this.prisma.curriculum.count({ where }),
+      this.prisma.curriculum.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+        take: limitNumber,
+        skip: (pageNumber - 1) * limitNumber,
+        include: { _count: { select: { chapters: true, lessons: true } } },
+      }),
     ]);
 
-    const chapterCountMap = new Map(chapterCounts.map((r) => [r.curriculumId, Number(r.count)]));
-    const lessonCountMap = new Map(lessonCounts.map((r) => [r.curriculumId, Number(r.count)]));
-
-    const enrichedRows = rows.map((row) => ({
-      ...row,
-      chapterCount: chapterCountMap.get(row.id) ?? 0,
-      lessonCount: lessonCountMap.get(row.id) ?? 0,
-    }));
-
-    const rowsWithCounts = enrichedRows;
-
     return {
-      curriculums: rowsWithCounts,
-      pagination: {
-        total,
-        page: pageNumber,
-        limit: limitNumber,
-        totalPages: Math.ceil(total / limitNumber),
-      },
+      curriculums: rows.map(({ _count, ...row }) => ({
+        ...row,
+        chapterCount: _count.chapters,
+        lessonCount: _count.lessons,
+      })),
+      pagination: buildPagination(total, pageNumber, limitNumber),
     };
   }
 
   async findById(id: string) {
-    const [curriculum] = await this.db.select().from(curriculums).where(eq(curriculums.id, id));
-    return curriculum ?? null;
+    return this.prisma.curriculum.findUnique({ where: { id } });
   }
 
   async findByIdWithDetails(id: string) {
-    const [curriculum] = await this.db.select().from(curriculums).where(eq(curriculums.id, id));
+    const curriculum = await this.prisma.curriculum.findUnique({ where: { id } });
     if (!curriculum) return null;
 
     const [chapterRows, lessonRows] = await Promise.all([
-      this.db
-        .select()
-        .from(chapters)
-        .where(eq(chapters.curriculumId, id))
-        .orderBy(asc(chapters.order)),
-      this.db
-        .select()
-        .from(lessons)
-        .where(eq(lessons.curriculumId, id))
-        .orderBy(asc(lessons.order)),
+      this.prisma.chapter.findMany({ where: { curriculumId: id }, orderBy: { order: 'asc' } }),
+      this.prisma.lesson.findMany({ where: { curriculumId: id }, orderBy: { order: 'asc' } }),
     ]);
 
     const chaptersWithLessons = chapterRows.map((chapter) => ({
@@ -160,23 +93,20 @@ export class CurriculumRepository {
   }
 
   async update(id: string, data: UpdateCurriculumDto) {
-    const updateData: Record<string, any> = { ...data };
-    if (data.grade !== undefined) {
-      updateData.grade = String(data.grade);
+    const updateData: Prisma.CurriculumUncheckedUpdateInput = {
+      ...data,
+      grade: data.grade !== undefined ? String(data.grade) : undefined,
+    };
+    try {
+      return await this.prisma.curriculum.update({ where: { id }, data: updateData });
+    } catch (error) {
+      if (isRecordNotFound(error)) return null;
+      throw error;
     }
-    const [curriculum] = await this.db
-      .update(curriculums)
-      .set(updateData)
-      .where(eq(curriculums.id, id))
-      .returning();
-    return curriculum ?? null;
   }
 
   async delete(id: string) {
-    const [curriculum] = await this.db
-      .delete(curriculums)
-      .where(eq(curriculums.id, id))
-      .returning();
-    return !!curriculum;
+    const { count } = await this.prisma.curriculum.deleteMany({ where: { id } });
+    return count > 0;
   }
 }

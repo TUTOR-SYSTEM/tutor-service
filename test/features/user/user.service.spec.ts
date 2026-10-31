@@ -1,65 +1,30 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { eq, inArray } from 'drizzle-orm';
-import { DRIZZLE } from 'src/database/database.module';
-import { users } from 'src/database/schema';
 import { UserService } from 'src/features/user/user.service';
-
-jest.mock('drizzle-orm', () => {
-  const actual = jest.requireActual('drizzle-orm');
-  return {
-    ...actual,
-    eq: jest.fn((column: unknown, value: unknown) => ({ op: 'eq', column, value })),
-    inArray: jest.fn((column: unknown, values: unknown) => ({ op: 'inArray', column, values })),
-  };
-});
+import { createPrismaMock, PrismaMock } from '../../support/prisma.mock';
 
 const USER_ID = '11111111-1111-4111-8111-111111111111';
 
-// Chainable, awaitable stand-in for a drizzle select: every builder method returns the chain and
-// awaiting it resolves to the scripted rows.
-const chain = (rows: unknown) => {
-  const c: Record<string, unknown> = {};
-  for (const m of ['from', 'where', 'limit']) c[m] = jest.fn(() => c);
-  c.then = (resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) =>
-    Promise.resolve(rows).then(resolve, reject);
-  return c;
-};
-
 describe('UserService', () => {
   let service: UserService;
-  let db: { select: jest.Mock };
+  let prisma: PrismaMock;
 
-  beforeEach(async () => {
-    jest.clearAllMocks();
-    db = { select: jest.fn() };
-
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [UserService, { provide: DRIZZLE, useValue: db }],
-    }).compile();
-
-    service = module.get(UserService);
+  beforeEach(() => {
+    prisma = createPrismaMock();
+    service = new UserService(prisma as never);
   });
 
   describe('getUserByField', () => {
-    it.each([
-      ['id', 'id'],
-      ['email', 'email'],
-      ['username', 'username'],
-      ['phone', 'phone'],
-      ['userCode', 'userCode'],
-    ] as const)('filters by %s using the matching column', async (field) => {
-      const row = { id: USER_ID };
-      const from = jest.fn();
-      const where = jest.fn().mockResolvedValue([row]);
-      db.select.mockReturnValue({ from: from.mockReturnValue({ where }) });
+    it.each(['id', 'email', 'username', 'phone', 'userCode'] as const)(
+      'filters by %s using the matching column',
+      async (field) => {
+        const row = { id: USER_ID };
+        prisma.user.findMany.mockResolvedValue([row]);
 
-      const result = await service.getUserByField({ field, value: 'the-value' });
+        const result = await service.getUserByField({ field, value: 'the-value' });
 
-      expect(from).toHaveBeenCalledWith(users);
-      expect(eq).toHaveBeenCalledWith(users[field], 'the-value');
-      expect(where).toHaveBeenCalledWith({ op: 'eq', column: users[field], value: 'the-value' });
-      expect(result).toEqual([row]);
-    });
+        expect(prisma.user.findMany).toHaveBeenCalledWith({ where: { [field]: 'the-value' } });
+        expect(result).toEqual([row]);
+      },
+    );
 
     it('returns an empty list without querying when the field is not whitelisted', async () => {
       const result = await service.getUserByField({
@@ -68,11 +33,11 @@ describe('UserService', () => {
       });
 
       expect(result).toEqual([]);
-      expect(db.select).not.toHaveBeenCalled();
+      expect(prisma.user.findMany).not.toHaveBeenCalled();
     });
 
     it('returns an empty list when no row matches', async () => {
-      db.select.mockReturnValue({ from: () => ({ where: () => Promise.resolve([]) }) });
+      prisma.user.findMany.mockResolvedValue([]);
 
       await expect(
         service.getUserByField({ field: 'email', value: 'none@x.dev' }),
@@ -80,9 +45,7 @@ describe('UserService', () => {
     });
 
     it('propagates database errors to the caller', async () => {
-      db.select.mockReturnValue({
-        from: () => ({ where: () => Promise.reject(new Error('connection lost')) }),
-      });
+      prisma.user.findMany.mockRejectedValue(new Error('connection lost'));
 
       await expect(service.getUserByField({ field: 'id', value: USER_ID })).rejects.toThrow(
         'connection lost',
@@ -91,25 +54,25 @@ describe('UserService', () => {
   });
 
   describe('userExists', () => {
-    it('selects only the id and limits to one row', async () => {
-      const select = chain([{ id: USER_ID }]);
-      db.select.mockReturnValue(select);
+    it('selects only the id of the given user', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: USER_ID });
 
       await service.userExists(USER_ID);
 
-      expect(db.select).toHaveBeenCalledWith({ id: users.id });
-      expect(select.limit).toHaveBeenCalledWith(1);
-      expect(eq).toHaveBeenCalledWith(users.id, USER_ID);
+      expect(prisma.user.findUnique).toHaveBeenCalledWith({
+        where: { id: USER_ID },
+        select: { id: true },
+      });
     });
 
     it('returns true when a row is found', async () => {
-      db.select.mockReturnValue(chain([{ id: USER_ID }]));
+      prisma.user.findUnique.mockResolvedValue({ id: USER_ID });
 
       await expect(service.userExists(USER_ID)).resolves.toBe(true);
     });
 
     it('returns false when no row is found', async () => {
-      db.select.mockReturnValue(chain([]));
+      prisma.user.findUnique.mockResolvedValue(null);
 
       await expect(service.userExists(USER_ID)).resolves.toBe(false);
     });
@@ -117,18 +80,19 @@ describe('UserService', () => {
 
   describe('getUserRoleById', () => {
     it('selects id and role for the given user', async () => {
-      const select = chain([{ id: USER_ID, role: 'TUTOR' }]);
-      db.select.mockReturnValue(select);
+      prisma.user.findUnique.mockResolvedValue({ id: USER_ID, role: 'TUTOR' });
 
       const result = await service.getUserRoleById(USER_ID);
 
-      expect(db.select).toHaveBeenCalledWith({ id: users.id, role: users.role });
-      expect(select.limit).toHaveBeenCalledWith(1);
+      expect(prisma.user.findUnique).toHaveBeenCalledWith({
+        where: { id: USER_ID },
+        select: { id: true, role: true },
+      });
       expect(result).toEqual({ id: USER_ID, role: 'TUTOR' });
     });
 
     it('returns null when the user does not exist', async () => {
-      db.select.mockReturnValue(chain([]));
+      prisma.user.findUnique.mockResolvedValue(null);
 
       await expect(service.getUserRoleById(USER_ID)).resolves.toBeNull();
     });
@@ -137,7 +101,7 @@ describe('UserService', () => {
   describe('getUserRolesByIds', () => {
     it('returns an empty list without querying when no ids are given', async () => {
       await expect(service.getUserRolesByIds([])).resolves.toEqual([]);
-      expect(db.select).not.toHaveBeenCalled();
+      expect(prisma.user.findMany).not.toHaveBeenCalled();
     });
 
     it('looks up every requested id in one query', async () => {
@@ -145,13 +109,15 @@ describe('UserService', () => {
         { id: 'a', role: 'STUDENT' },
         { id: 'b', role: 'PARENT' },
       ];
-      const where = jest.fn().mockResolvedValue(rows);
-      db.select.mockReturnValue({ from: () => ({ where }) });
+      prisma.user.findMany.mockResolvedValue(rows);
 
       const result = await service.getUserRolesByIds(['a', 'b']);
 
-      expect(db.select).toHaveBeenCalledTimes(1);
-      expect(inArray).toHaveBeenCalledWith(users.id, ['a', 'b']);
+      expect(prisma.user.findMany).toHaveBeenCalledTimes(1);
+      expect(prisma.user.findMany).toHaveBeenCalledWith({
+        where: { id: { in: ['a', 'b'] } },
+        select: { id: true, role: true },
+      });
       expect(result).toEqual(rows);
     });
   });

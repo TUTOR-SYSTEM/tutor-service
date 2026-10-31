@@ -1,36 +1,29 @@
-import { Inject, Injectable } from '@nestjs/common';
-import { DRIZZLE } from 'src/database/database.module';
-import { drizzle } from 'drizzle-orm/postgres-js';
-import { v4 as uuidv4 } from 'uuid';
+import { Injectable } from '@nestjs/common';
+import { PrismaService, isRecordNotFound } from '../../database/prisma.service';
 import { type CreateChapterDto, type UpdateChapterDto } from '@packages/entities';
-import { chapters, curriculums } from 'src/database/schema';
-import { count, eq } from 'drizzle-orm';
+import { buildPagination } from '@packages/helpers';
 
 @Injectable()
 export class ChapterRepository {
-  constructor(@Inject(DRIZZLE) private readonly db: ReturnType<typeof drizzle>) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async curriculumExists(id: string): Promise<boolean> {
-    const [curriculum] = await this.db
-      .select({ id: curriculums.id })
-      .from(curriculums)
-      .where(eq(curriculums.id, id))
-      .limit(1);
+    const curriculum = await this.prisma.curriculum.findUnique({
+      where: { id },
+      select: { id: true },
+    });
     return !!curriculum;
   }
 
   async create({ curriculumId, data }: { curriculumId: string; data: CreateChapterDto }) {
-    const [chapter] = await this.db
-      .insert(chapters)
-      .values({
-        id: uuidv4(),
+    return this.prisma.chapter.create({
+      data: {
         curriculumId,
         title: data.title,
         description: data.description ?? null,
         order: data.order ?? 0,
-      })
-      .returning();
-    return chapter;
+      },
+    });
   }
 
   async findAll({
@@ -42,49 +35,39 @@ export class ChapterRepository {
     page?: number;
     limit?: number;
   }) {
-    const whereClause = eq(chapters.curriculumId, curriculumId);
-    const [totalRow] = await this.db.select({ total: count() }).from(chapters).where(whereClause);
-    const total = Number(totalRow?.total ?? 0);
+    const where = { curriculumId };
     const pageNumber = Number(page);
     const limitNumber = Number(limit);
-    const offset = (pageNumber - 1) * limitNumber;
 
-    const rows = await this.db
-      .select()
-      .from(chapters)
-      .where(whereClause)
-      // stable order — without it OFFSET pagination can repeat/skip rows between pages
-      .orderBy(chapters.order, chapters.id)
-      .limit(limitNumber)
-      .offset(offset);
+    const [total, rows] = await Promise.all([
+      this.prisma.chapter.count({ where }),
+      this.prisma.chapter.findMany({
+        where,
+        // stable order — without it OFFSET pagination can repeat/skip rows between pages
+        orderBy: [{ order: 'asc' }, { id: 'asc' }],
+        take: limitNumber,
+        skip: (pageNumber - 1) * limitNumber,
+      }),
+    ]);
 
-    return {
-      chapters: rows,
-      pagination: {
-        total,
-        page: pageNumber,
-        limit: limitNumber,
-        totalPages: Math.ceil(total / limitNumber),
-      },
-    };
+    return { chapters: rows, pagination: buildPagination(total, pageNumber, limitNumber) };
   }
 
   async findById(id: string) {
-    const [chapter] = await this.db.select().from(chapters).where(eq(chapters.id, id)).limit(1);
-    return chapter ?? null;
+    return this.prisma.chapter.findUnique({ where: { id } });
   }
 
   async update(id: string, data: UpdateChapterDto) {
-    const [chapter] = await this.db
-      .update(chapters)
-      .set(data)
-      .where(eq(chapters.id, id))
-      .returning();
-    return chapter ?? null;
+    try {
+      return await this.prisma.chapter.update({ where: { id }, data });
+    } catch (error) {
+      if (isRecordNotFound(error)) return null;
+      throw error;
+    }
   }
 
   async delete(id: string) {
-    const [chapter] = await this.db.delete(chapters).where(eq(chapters.id, id)).returning();
-    return !!chapter;
+    const { count } = await this.prisma.chapter.deleteMany({ where: { id } });
+    return count > 0;
   }
 }

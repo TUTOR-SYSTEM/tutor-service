@@ -11,12 +11,8 @@ import {
 import { Server, Socket } from 'socket.io';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { Inject } from '@nestjs/common';
-import { DRIZZLE } from '../../database/database.module';
+import { PrismaService } from '../../database/prisma.service';
 import { resolveJwtAccessSecret } from '../../packages/configs/jwt-sign.config';
-import { type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import { and, eq } from 'drizzle-orm';
-import { conversationParticipants, users } from 'src/database/schema';
 import { MessageService } from './message.service';
 import { ConversationService } from './conversation.service';
 import { resolveCorsOrigins } from '@packages/helpers/cors.helper';
@@ -43,7 +39,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   constructor(
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
-    @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<Record<string, never>>,
+    private readonly prisma: PrismaService,
     private readonly messageService: MessageService,
     private readonly conversationService: ConversationService,
   ) {}
@@ -70,8 +66,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const userId = decoded.sub;
 
-      const user = await this.db.select().from(users).where(eq(users.id, userId)).limit(1);
-      if (user.length === 0) {
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true },
+      });
+      if (!user) {
         client.disconnect();
         return;
       }
@@ -149,17 +148,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private async isParticipant(conversationId: string, userId: string): Promise<boolean> {
     if (typeof conversationId !== 'string' || !conversationId) return false;
     try {
-      const rows = await this.db
-        .select({ id: conversationParticipants.id })
-        .from(conversationParticipants)
-        .where(
-          and(
-            eq(conversationParticipants.conversationId, conversationId),
-            eq(conversationParticipants.userId, userId),
-          ),
-        )
-        .limit(1);
-      return rows.length > 0;
+      const row = await this.prisma.conversationParticipant.findUnique({
+        where: { conversationId_userId: { conversationId, userId } },
+        select: { id: true },
+      });
+      return !!row;
     } catch {
       return false;
     }

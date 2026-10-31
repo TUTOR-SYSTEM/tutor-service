@@ -7,24 +7,7 @@
  * Requires the dev server to be running (port 8888).
  */
 import 'dotenv/config';
-import postgres from 'postgres';
-import { drizzle } from 'drizzle-orm/postgres-js';
-import * as schema from '../src/database/schema';
-import { grades } from '../src/database/schema';
-
-function resolveDatabaseUrl(): string {
-  const databaseUrl = process.env.DATABASE_URL?.trim();
-  if (databaseUrl) return databaseUrl;
-  const host = process.env.POSTGRES_HOST?.trim() || 'localhost';
-  const port = process.env.POSTGRES_PORT?.trim() || '5433';
-  const db = process.env.POSTGRES_DB?.trim() || 'backends_db';
-  const user = process.env.POSTGRES_USER?.trim() || 'postgres';
-  const password = process.env.POSTGRES_PASSWORD?.trim() || 'postgres';
-  const url = new URL(`postgres://${host}:${port}/${db}`);
-  url.username = user;
-  url.password = password;
-  return url.toString();
-}
+import { createPrisma } from './lib/prisma';
 
 const BASE = 'http://localhost:8888';
 
@@ -58,10 +41,9 @@ async function main() {
   console.log('\n── Seeding education flow ──────────────────────────────────\n');
 
   // DB client — only used to look up the grade ID (no suitable public API endpoint)
-  const client = postgres(resolveDatabaseUrl());
-  const db = drizzle(client, { schema });
-  const [grade] = await db.select().from(grades).limit(1);
-  await client.end();
+  const prisma = createPrisma();
+  const grade = await prisma.grade.findFirst();
+  await prisma.$disconnect();
   if (!grade) throw new Error('No grades found — run: bun run db:seed:grades first');
   const gradeId = grade.id;
 

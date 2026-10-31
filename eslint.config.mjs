@@ -10,7 +10,7 @@ export default tseslint.config(
       'eslint.config.mjs',
       'dist/**',
       'node_modules/**',
-      'drizzle/**',
+      'prisma/**',
       'coverage/**',
       '*.config.js',
       '*.config.cjs',

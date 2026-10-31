@@ -1,8 +1,6 @@
-import { Inject, Injectable } from '@nestjs/common';
-import { and, count, countDistinct, eq, gte, inArray, lte, sql, type SQL } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/postgres-js';
-import { DRIZZLE } from '../../database/database.module';
-import { classes, classStudents, exercise, lessons, sessions, users } from 'src/database/schema';
+import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import { PrismaService, uuidList } from '../../database/prisma.service';
 import { buildListWhereClause } from '@packages/helpers';
 
 export interface ClassAggregate {
@@ -22,23 +20,18 @@ export interface ClassBaseRow {
   tutorLastName: string | null;
 }
 
+const CLASS_SEARCH_FIELDS = ['name', 'code', 'subject'] as const;
+
 @Injectable()
 export class ReportRepository {
-  constructor(
-    @Inject(DRIZZLE)
-    private readonly db: ReturnType<typeof drizzle>,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async countActiveClasses(): Promise<number> {
-    const [row] = await this.db
-      .select({ total: count() })
-      .from(classes)
-      .where(eq(classes.status, 'OPEN'));
-    return Number(row?.total ?? 0);
+    return this.prisma.class.count({ where: { status: 'OPEN' } });
   }
 
   async getAllClassIds(): Promise<string[]> {
-    const rows = await this.db.select({ id: classes.id }).from(classes);
+    const rows = await this.prisma.class.findMany({ select: { id: true } });
     return rows.map((r) => r.id);
   }
 
@@ -47,18 +40,12 @@ export class ReportRepository {
     from?: Date,
     to?: Date,
   ): Promise<{ completed: number; resolved: number }> {
-    const conditions: SQL[] = [];
-    if (from) conditions.push(gte(sessions.startAt, from));
-    if (to) conditions.push(lte(sessions.startAt, to));
-
-    const [row] = await this.db
-      .select({
-        completed: sql<number>`count(*) filter (where ${sessions.status} = 'COMPLETED')::int`,
-        resolved: sql<number>`count(*) filter (where ${sessions.status} in ('COMPLETED', 'CANCELLED'))::int`,
-      })
-      .from(sessions)
-      .where(conditions.length > 0 ? and(...conditions) : undefined);
-    return { completed: Number(row?.completed ?? 0), resolved: Number(row?.resolved ?? 0) };
+    const startAt: Prisma.DateTimeFilter = { ...(from && { gte: from }), ...(to && { lte: to }) };
+    const [completed, cancelled] = await Promise.all([
+      this.prisma.classSession.count({ where: { startAt, status: 'COMPLETED' } }),
+      this.prisma.classSession.count({ where: { startAt, status: 'CANCELLED' } }),
+    ]);
+    return { completed, resolved: completed + cancelled };
   }
 
   /** Per-month session attendance for the given month buckets (each [from, to)). */
@@ -70,26 +57,16 @@ export class ReportRepository {
 
   /** Overall exercise submission rate across every exercise row. */
   async getGlobalSubmissionStats(): Promise<{ submitted: number; total: number }> {
-    const [row] = await this.db
-      .select({
-        submitted: sql<number>`count(*) filter (where ${exercise.status} <> 'RESUBMIT')::int`,
-        total: sql<number>`count(*)::int`,
-      })
-      .from(exercise);
-    return { submitted: Number(row?.submitted ?? 0), total: Number(row?.total ?? 0) };
+    const [total, resubmit] = await Promise.all([
+      this.prisma.exercise.count(),
+      this.prisma.exercise.count({ where: { status: 'RESUBMIT' } }),
+    ]);
+    return { submitted: total - resubmit, total };
   }
 
   async getClassesTotal(search?: string): Promise<number> {
-    const whereClause = buildListWhereClause({
-      search,
-      searchableColumns: {
-        name: { column: classes.name },
-        code: { column: classes.code },
-        subject: { column: classes.subject },
-      },
-    });
-    const [row] = await this.db.select({ total: count() }).from(classes).where(whereClause);
-    return Number(row?.total ?? 0);
+    const where = buildListWhereClause({ search, searchFields: CLASS_SEARCH_FIELDS });
+    return this.prisma.class.count({ where: where as Prisma.ClassWhereInput | undefined });
   }
 
   async getClassesPage({
@@ -101,29 +78,26 @@ export class ReportRepository {
     limit: number;
     offset: number;
   }): Promise<ClassBaseRow[]> {
-    const whereClause = buildListWhereClause({
-      search,
-      searchableColumns: {
-        name: { column: classes.name },
-        code: { column: classes.code },
-        subject: { column: classes.subject },
+    const where = buildListWhereClause({ search, searchFields: CLASS_SEARCH_FIELDS });
+
+    const rows = await this.prisma.class.findMany({
+      where: where as Prisma.ClassWhereInput | undefined,
+      select: {
+        id: true,
+        name: true,
+        curriculumId: true,
+        tutor: { select: { firstName: true, lastName: true } },
       },
+      orderBy: { createdAt: 'asc' },
+      take: limit,
+      skip: offset,
     });
 
-    return this.db
-      .select({
-        id: classes.id,
-        name: classes.name,
-        curriculumId: classes.curriculumId,
-        tutorFirstName: users.firstName,
-        tutorLastName: users.lastName,
-      })
-      .from(classes)
-      .leftJoin(users, eq(users.id, classes.tutorId))
-      .where(whereClause)
-      .orderBy(classes.createdAt)
-      .limit(limit)
-      .offset(offset);
+    return rows.map(({ tutor, ...row }) => ({
+      ...row,
+      tutorFirstName: tutor?.firstName ?? null,
+      tutorLastName: tutor?.lastName ?? null,
+    }));
   }
 
   /** Per-class aggregates (attendance, curriculum progress, assignments, average score) for the given class ids. */
@@ -131,66 +105,75 @@ export class ReportRepository {
     const result = new Map<string, ClassAggregate>();
     if (classIds.length === 0) return result;
 
-    const [studentCounts, sessionAgg, doneLessons, classCurricula, exerciseAgg] = await Promise.all(
-      [
-        this.db
-          .select({ classId: classStudents.classId, total: count() })
-          .from(classStudents)
-          .where(inArray(classStudents.classId, classIds))
-          .groupBy(classStudents.classId),
-        this.db
-          .select({
-            classId: sessions.classId,
-            completed: sql<number>`count(*) filter (where ${sessions.status} = 'COMPLETED')::int`,
-            resolved: sql<number>`count(*) filter (where ${sessions.status} in ('COMPLETED', 'CANCELLED'))::int`,
-          })
-          .from(sessions)
-          .where(inArray(sessions.classId, classIds))
-          .groupBy(sessions.classId),
-        this.db
-          .select({
-            classId: sessions.classId,
-            doneLessons: countDistinct(sessions.lessonId),
-          })
-          .from(sessions)
-          .where(and(inArray(sessions.classId, classIds), eq(sessions.status, 'COMPLETED')))
-          .groupBy(sessions.classId),
-        this.db
-          .select({ id: classes.id, curriculumId: classes.curriculumId })
-          .from(classes)
-          .where(inArray(classes.id, classIds)),
-        this.db
-          .select({
-            classId: sessions.classId,
-            total: sql<number>`count(*)::int`,
-            submitted: sql<number>`count(*) filter (where ${exercise.status} <> 'RESUBMIT')::int`,
-            averageScore: sql<string | null>`avg(${exercise.score})`,
-          })
-          .from(exercise)
-          .innerJoin(sessions, eq(exercise.sessionId, sessions.id))
-          .where(inArray(sessions.classId, classIds))
-          .groupBy(sessions.classId),
-      ],
-    );
+    const [studentCounts, sessionAgg, doneLessonRows, classCurricula, exerciseAgg] =
+      await Promise.all([
+        this.prisma.classStudent.groupBy({
+          by: ['classId'],
+          where: { classId: { in: classIds } },
+          _count: { _all: true },
+        }),
+        this.prisma.classSession.groupBy({
+          by: ['classId', 'status'],
+          where: { classId: { in: classIds } },
+          _count: { _all: true },
+        }),
+        // distinct (class, lesson) pairs of completed sessions — nulls are not lessons
+        this.prisma.classSession.findMany({
+          where: { classId: { in: classIds }, status: 'COMPLETED', lessonId: { not: null } },
+          select: { classId: true, lessonId: true },
+          distinct: ['classId', 'lessonId'],
+        }),
+        this.prisma.class.findMany({
+          where: { id: { in: classIds } },
+          select: { id: true, curriculumId: true },
+        }),
+        this.prisma.$queryRaw<
+          {
+            classId: string;
+            total: number;
+            submitted: number;
+            averageScore: Prisma.Decimal | null;
+          }[]
+        >`
+          SELECT s.class_id AS "classId",
+                 count(*)::int AS total,
+                 (count(*) FILTER (WHERE e.status <> 'RESUBMIT'))::int AS submitted,
+                 avg(e.score) AS "averageScore"
+          FROM exercises e
+          INNER JOIN class_sessions s ON e.session_id = s.id
+          WHERE s.class_id IN (${uuidList(classIds)})
+          GROUP BY s.class_id`,
+      ]);
 
     const curriculumIds = [
       ...new Set(classCurricula.map((c) => c.curriculumId).filter((id): id is string => !!id)),
     ];
     const lessonTotals =
       curriculumIds.length > 0
-        ? await this.db
-            .select({ curriculumId: lessons.curriculumId, total: count() })
-            .from(lessons)
-            .where(inArray(lessons.curriculumId, curriculumIds))
-            .groupBy(lessons.curriculumId)
+        ? await this.prisma.lesson.groupBy({
+            by: ['curriculumId'],
+            where: { curriculumId: { in: curriculumIds } },
+            _count: { _all: true },
+          })
         : [];
 
-    const lessonTotalMap = new Map(lessonTotals.map((l) => [l.curriculumId, Number(l.total)]));
+    const lessonTotalMap = new Map(lessonTotals.map((l) => [l.curriculumId, l._count._all]));
     const curriculumByClass = new Map(classCurricula.map((c) => [c.id, c.curriculumId]));
-    const studentCountMap = new Map(studentCounts.map((s) => [s.classId, Number(s.total)]));
-    const sessionAggMap = new Map(sessionAgg.map((s) => [s.classId, s]));
-    const doneLessonsMap = new Map(doneLessons.map((d) => [d.classId, Number(d.doneLessons)]));
+    const studentCountMap = new Map(studentCounts.map((s) => [s.classId, s._count._all]));
     const exerciseAggMap = new Map(exerciseAgg.map((e) => [e.classId, e]));
+
+    const sessionAggMap = new Map<string, { completed: number; resolved: number }>();
+    for (const row of sessionAgg) {
+      const agg = sessionAggMap.get(row.classId) ?? { completed: 0, resolved: 0 };
+      if (row.status === 'COMPLETED') agg.completed += row._count._all;
+      if (row.status === 'COMPLETED' || row.status === 'CANCELLED') agg.resolved += row._count._all;
+      sessionAggMap.set(row.classId, agg);
+    }
+
+    const doneLessonsMap = new Map<string, number>();
+    for (const row of doneLessonRows) {
+      doneLessonsMap.set(row.classId, (doneLessonsMap.get(row.classId) ?? 0) + 1);
+    }
 
     for (const classId of classIds) {
       const session = sessionAggMap.get(classId);

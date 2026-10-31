@@ -1,10 +1,6 @@
 import { Controller } from '@nestjs/common';
 import { MessagePattern, Payload } from '@nestjs/microservices';
-import type {
-  CreateCurriculumDto,
-  GetCurriculumsQueryDto,
-  UpdateCurriculumDto,
-} from '@packages/entities/curriculum';
+import type { CreateCurriculumDto, GetCurriculumsQueryDto } from '@packages/entities/curriculum';
 import { CurriculumService } from './curriculum.service';
 
 /**

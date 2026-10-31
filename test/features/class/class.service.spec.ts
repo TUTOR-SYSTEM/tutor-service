@@ -10,7 +10,7 @@ import { ClassService } from 'src/features/class/class.service';
 import { ClassRepository } from 'src/features/class/class.repository';
 import { UserService } from 'src/features/user/user.service';
 
-// class.repository pulls drizzle + an ESM-only transitive dep (uuid) that jest cannot parse;
+// class.repository pulls an ESM-only transitive dep (uuid) that jest cannot parse;
 // the service only needs the repository token, so swap the module for a bare class
 jest.mock('src/features/class/class.repository', () => ({
   ClassRepository: class ClassRepository {},
@@ -176,7 +176,7 @@ describe('ClassService', () => {
       ).rejects.toThrow(new BadRequestException(ERROR_MESSAGES.CLASS_NAME_EXISTS));
     });
 
-    it('maps a unique-violation (drizzle-wrapped in cause) on code to the code-exists error', async () => {
+    it('maps a unique-violation (raw driver code in cause) on code to the code-exists error', async () => {
       repo.create.mockRejectedValue(
         Object.assign(new Error('wrapped'), { cause: { code: '23505' } }),
       );
