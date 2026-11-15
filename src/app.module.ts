@@ -12,12 +12,14 @@ import { ClassModule } from './features/class/class.module';
 import { CurriculumModule } from './features/curriculum/curriculum.module';
 import { DashboardModule } from './features/dashboard/dashboard.module';
 import { ExerciseModule } from './features/exercise/exercise.module';
+import { CourseProgressModule } from './features/course-progress/course-progress.module';
+import { ApiRoutesModule } from './features/api-routes/api-routes.module';
 import { LessonModule } from './features/lesson/lesson.module';
 import { ReportModule } from './features/report/report.module';
 import { ScheduleModule } from './features/schedule/schedule.module';
 import { SessionModule } from './features/session/session.module';
 import { TuitionModule } from './features/tuition/tuition.module';
-import { JwtAuthGuard, LanguageGuard } from '@packages/guards';
+import { JwtAuthGuard, LanguageGuard } from './packages/guards';
 import { APP_GUARD } from '@nestjs/core';
 import { JwtModule } from '@nestjs/jwt';
 import { RmqModule } from './features/rabbitmq/rmq.module';
@@ -38,6 +40,8 @@ import { RmqModule } from './features/rabbitmq/rmq.module';
     ScheduleModule,
     SessionModule,
     ExerciseModule,
+    CourseProgressModule,
+    ApiRoutesModule,
     AttendanceModule,
     DashboardModule,
     AgentsModule,

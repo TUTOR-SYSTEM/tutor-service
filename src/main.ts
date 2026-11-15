@@ -59,8 +59,10 @@ async function bootstrap() {
   rmqMicroservice.useGlobalInterceptors(new TraceContextInterceptor());
 
   const config = new DocumentBuilder()
-    .setTitle('Backends API')
-    .setDescription('API documentation for the Backends financial management system')
+    .setTitle('Tutor Service API')
+    .setDescription(
+      'API documentation for tutor-service (classes, schedules, sessions, curriculum, tuition, reports)',
+    )
     .setVersion('1.0')
     .addBearerAuth(
       {
@@ -71,29 +73,21 @@ async function bootstrap() {
       },
       'access-token',
     )
-    // ── Tutor Management ─────────────────────────────
-    .addTag('Users')
-    .addTag('Auth')
-    .addTag('Students')
-    .addTag('Curriculum')
-    .addTag('Chapter')
-    .addTag('Lesson')
+    // ── Tutor features (the tags this repo's controllers use) ──
     .addTag('Classes')
     .addTag('Schedules')
     .addTag('Sessions')
+    .addTag('Curriculum')
+    .addTag('Chapter')
+    .addTag('Lesson')
     .addTag('Exercises')
     .addTag('Tuitions')
-    .addTag('Notifications')
-    // ── Finance Management ────────────────────────────
-    .addTag('Categories')
-    .addTag('Wallets')
-    .addTag('Transactions')
+    .addTag('Attendance')
+    .addTag('Chat')
+    .addTag('Dashboard')
     .addTag('Reports')
     // ── System ────────────────────────────────────────
-    .addTag('Upload')
-    .addTag('Cloudinary')
     .addTag('Health')
-    .addTag('Redis')
     .build();
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api-docs', app, document, {

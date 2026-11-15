@@ -10,6 +10,7 @@ import { buildPagination } from '@packages/helpers';
 
 type ExerciseUpdate = Partial<{
   exerciseUrls: Prisma.InputJsonValue;
+  answerKeyUrls: Prisma.InputJsonValue;
   status: ExerciseStatus;
   score: string | null;
   comment: string | null;
@@ -30,6 +31,7 @@ export class ExerciseRepository {
       studentId: row.studentId,
       issueUrls: (row.issueUrls ?? []) as ExerciseDetailDto['issueUrls'],
       exerciseUrls: (row.exerciseUrls ?? []) as ExerciseDetailDto['exerciseUrls'],
+      answerKeyUrls: (row.answerKeyUrls ?? []) as ExerciseDetailDto['answerKeyUrls'],
       status: row.status,
       score: row.score !== null ? Number(row.score) : null,
       comment: row.comment,
@@ -71,6 +73,66 @@ export class ExerciseRepository {
     return row ? this.map(row) : null;
   }
 
+  /**
+   * Quyền tải file theo key (R2 object key). Trả về true nếu user liên quan tới buổi học / bài tập /
+   * bài giảng có chứa key đó:
+   * - buổi học: gia sư của lớp, học sinh đang học lớp, phụ huynh của học sinh đó;
+   * - bài tập (đề, bài nộp, đáp án): gia sư chấm, học sinh làm bài, phụ huynh của học sinh;
+   * - bài giảng (lesson): mọi TUTOR.
+   * Dùng `position(key in cột::text)` thay LIKE để key không bị hiểu như wildcard.
+   */
+  async canAccessFile({ key, userId, role }: { key: string; userId: string; role?: string | null }) {
+    if (role === 'ADMIN') return true;
+    const rows = await this.prisma.$queryRaw<{ ok: boolean }[]>`
+      SELECT (
+        EXISTS (
+          SELECT 1 FROM class_sessions s
+          JOIN classes c ON c.id = s.class_id
+          WHERE (position(${key} in s.theory_urls::text) > 0 OR position(${key} in s.exercise_urls::text) > 0)
+            AND (
+              c.tutor_id = ${userId}::uuid
+              OR EXISTS (
+                SELECT 1 FROM class_students cs
+                JOIN users st ON st.id = cs.student_id
+                WHERE cs.class_id = c.id
+                  AND (cs.student_id = ${userId}::uuid OR st.parent_id = ${userId}::uuid)
+              )
+            )
+        )
+        OR EXISTS (
+          SELECT 1 FROM exercises e
+          JOIN users st ON st.id = e.student_id
+          WHERE (position(${key} in e.issue_urls::text) > 0 OR position(${key} in e.exercise_urls::text) > 0)
+            AND (e.tutor_id = ${userId}::uuid OR e.student_id = ${userId}::uuid OR st.parent_id = ${userId}::uuid)
+        )
+        -- đáp án: gia sư luôn xem; học sinh/phụ huynh chỉ xem sau khi bài đã được chấm
+        OR EXISTS (
+          SELECT 1 FROM exercises e
+          JOIN users st ON st.id = e.student_id
+          WHERE position(${key} in e.answer_key_urls::text) > 0
+            AND (
+              e.tutor_id = ${userId}::uuid
+              OR (e.status = 'GRADED' AND (e.student_id = ${userId}::uuid OR st.parent_id = ${userId}::uuid))
+            )
+        )
+        OR (
+          ${role ?? ''} = 'TUTOR'
+          AND EXISTS (
+            SELECT 1 FROM lessons l
+            WHERE position(${key} in l.theory_urls::text) > 0 OR position(${key} in l.exercise_urls::text) > 0
+          )
+        )
+      ) AS ok
+    `;
+    return rows[0]?.ok === true;
+  }
+
+  /** True when `parentId` is the PARENT of `studentId` (student.parentId). */
+  async isParentOfStudent({ parentId, studentId }: { parentId: string; studentId: string }) {
+    const count = await this.prisma.user.count({ where: { id: studentId, parentId } });
+    return count > 0;
+  }
+
   // list exercises the acting user can reach (as the tutor or the student on the row),
   // narrowed by the optional query filters.
   async findAll({
@@ -84,8 +146,15 @@ export class ExerciseRepository {
   }) {
     const { page, limit, sessionId, studentId, classId, tutorId } = query;
 
+    // tutor (owner), the student on the row, or the PARENT of that student (student.parentId)
     const conditions: Prisma.ExerciseWhereInput[] = [
-      { OR: [{ tutorId: userId }, { studentId: userId }] },
+      {
+        OR: [
+          { tutorId: userId },
+          { studentId: userId },
+          { student: { parentId: userId } },
+        ],
+      },
     ];
     if (sessionId) conditions.push({ sessionId });
     if (studentId) conditions.push({ studentId });
@@ -140,9 +209,13 @@ export class ExerciseRepository {
   }: {
     id: string;
     data: ExerciseUpdate;
+    notStatus?: ExerciseStatus;
   }): Promise<ExerciseDetailDto | null> {
     try {
-      const row = await this.prisma.exercise.update({ where: { id }, data });
+      const row = await this.prisma.exercise.update({
+        where: { id, ...(notStatus ? { status: { not: notStatus } } : {}) },
+        data,
+      });
       return this.map(row);
     } catch (error) {
       if (isRecordNotFound(error)) return null;

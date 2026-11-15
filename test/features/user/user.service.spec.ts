@@ -116,7 +116,7 @@ describe('UserService', () => {
       expect(prisma.user.findMany).toHaveBeenCalledTimes(1);
       expect(prisma.user.findMany).toHaveBeenCalledWith({
         where: { id: { in: ['a', 'b'] } },
-        select: { id: true, role: true },
+        select: { id: true, role: true, tutorId: true },
       });
       expect(result).toEqual(rows);
     });

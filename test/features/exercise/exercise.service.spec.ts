@@ -50,6 +50,7 @@ describe('ExerciseService', () => {
       findAll: jest.fn(),
       findById: jest.fn(),
       findByStudentSession: jest.fn().mockResolvedValue(null),
+      isParentOfStudent: jest.fn().mockResolvedValue(false),
       update: jest.fn(),
     };
     // parties hold the right roles: the tutor teaches, the student is a STUDENT

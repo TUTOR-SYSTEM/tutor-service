@@ -6,7 +6,7 @@ import type {
   GetTuitionsQueryDto,
   UpdateTuitionDto,
 } from '@packages/entities/tuition';
-import { buildPagination } from '@packages/helpers';
+import { buildPagination, isAdminRole } from '@packages/helpers';
 import { toDate } from '@packages/helpers/date.helper';
 
 const TUITION_INCLUDE = {
@@ -22,8 +22,9 @@ type TuitionWithRelations = Prisma.TuitionGetPayload<{ include: typeof TUITION_I
 export class TuitionRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** A user may read a tuition if they are its student or the tutor of its class. */
-  private canRead(userId: string): Prisma.TuitionWhereInput {
+  /** A user may read a tuition if they are its student or the tutor of its class; admins read all. */
+  private canRead(userId: string, role?: string | null): Prisma.TuitionWhereInput {
+    if (isAdminRole(role)) return {};
     return { OR: [{ studentId: userId }, { class: { tutorId: userId } }] };
   }
 
@@ -70,7 +71,7 @@ export class TuitionRepository {
   }) {
     const { page, limit, classId, studentId, status } = query;
     const where: Prisma.TuitionWhereInput = {
-      AND: [this.canRead(userId), { classId, studentId, status }],
+      AND: [this.canRead(userId, role), { classId, studentId, status }],
     };
 
     const [total, rows] = await Promise.all([
@@ -91,9 +92,9 @@ export class TuitionRepository {
   }
 
   /** When `userId` is given the row is only returned if that user may read it. */
-  async findById(id: string, userId?: string) {
+  async findById(id: string, userId?: string, role?: string | null) {
     const row = await this.prisma.tuition.findFirst({
-      where: { id, ...(userId && this.canRead(userId)) },
+      where: { id, ...(userId && this.canRead(userId, role)) },
       include: TUITION_INCLUDE,
     });
     return row ? this.serialize(row) : null;
@@ -154,11 +155,19 @@ export class TuitionRepository {
   }
 
   /** Revenue summary over the classes the tutor owns (optionally narrowed to one class). */
-  async getSummary({ userId, classId }: { userId: string; classId?: string }) {
+  async getSummary({
+    userId,
+    role,
+    classId,
+  }: {
+    userId: string;
+    role?: string | null;
+    classId?: string;
+  }) {
     // one grouped scan instead of three sequential sum() queries
     const rows = await this.prisma.tuition.groupBy({
       by: ['status'],
-      where: { class: { tutorId: userId }, classId },
+      where: { ...(isAdminRole(role) ? {} : { class: { tutorId: userId } }), classId },
       _sum: { amount: true },
     });
 

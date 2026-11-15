@@ -118,16 +118,14 @@ export class SessionRepository {
     numbers: number[];
     excludeId?: string;
   }) {
-    const rows = await this.db
-      .select({ sessionNumber: sessions.sessionNumber })
-      .from(sessions)
-      .where(
-        and(
-          eq(sessions.classId, classId),
-          inArray(sessions.sessionNumber, numbers),
-          excludeId ? ne(sessions.id, excludeId) : undefined,
-        ),
-      );
+    const rows = await this.prisma.classSession.findMany({
+      where: {
+        classId,
+        sessionNumber: { in: numbers },
+        ...(excludeId ? { id: { not: excludeId } } : {}),
+      },
+      select: { sessionNumber: true },
+    });
     return rows.map((row) => row.sessionNumber);
   }
 

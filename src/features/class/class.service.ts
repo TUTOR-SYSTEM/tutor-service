@@ -45,14 +45,20 @@ export class ClassService {
   }
 
   // one query for the whole id list (was one query per id); same errors, same order
-  private async assertAllStudents(ids: string[]) {
+  /**
+   * Every id must be a STUDENT. A tutor may only enroll students they manage: a foreign or
+   * unmanaged student gets the same NotFound as a missing one, so ids can't be probed.
+   */
+  private async assertAllStudents(ids: string[], actor: { userId: string; role?: string | null }) {
     const rows = await this.user.getUserRolesByIds(ids);
-    const roleById = new Map(rows.map((r) => [r.id, r.role]));
+    const byId = new Map(rows.map((r) => [r.id, r]));
     for (const id of ids) {
-      if (!roleById.has(id))
-        throw new BadRequestException(`${ERROR_MESSAGES.STUDENT_NOT_FOUND}: ${id}`);
-      if (roleById.get(id) !== 'STUDENT')
+      const row = byId.get(id);
+      if (!row) throw new BadRequestException(`${ERROR_MESSAGES.STUDENT_NOT_FOUND}: ${id}`);
+      if (row.role !== 'STUDENT')
         throw new BadRequestException(`${ERROR_MESSAGES.USER_NOT_A_STUDENT}: ${id}`);
+      if (actor.role === 'TUTOR' && row.tutorId !== actor.userId)
+        throw new NotFoundException(`${ERROR_MESSAGES.STUDENT_NOT_FOUND}: ${id}`);
     }
   }
 
@@ -151,7 +157,7 @@ export class ClassService {
 
     if (studentIds) {
       const uniqueIds = [...new Set(studentIds)];
-      await this.assertAllStudents(uniqueIds);
+      await this.assertAllStudents(uniqueIds, { userId, role });
       await this.repo.syncStudents({ classId: id, studentIds: uniqueIds });
     }
 
@@ -323,7 +329,7 @@ export class ClassService {
 
     // dedupe input, then verify every id references an existing STUDENT user
     const studentIds = [...new Set(data.studentIds)];
-    await this.assertAllStudents(studentIds);
+    await this.assertAllStudents(studentIds, { userId, role });
 
     const inserted = await this.repo.addStudents({ classId, studentIds });
     const addedIds = inserted.map((row) => row.studentId);

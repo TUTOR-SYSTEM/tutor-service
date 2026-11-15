@@ -159,7 +159,11 @@ export class ExerciseService {
 
     const found = await this.repo.findById({ id });
     if (!found) throw new NotFoundException(ERROR_MESSAGES.EXERCISE_NOT_FOUND);
-    if (!isAdminRole(role) && found.studentId !== userId && found.tutorId !== userId) {
+    const isOwnerOrParty = found.studentId === userId || found.tutorId === userId;
+    const isChildParent =
+      !isOwnerOrParty &&
+      (await this.repo.isParentOfStudent({ parentId: userId, studentId: found.studentId }));
+    if (!isAdminRole(role) && !isOwnerOrParty && !isChildParent) {
       throw new NotFoundException(ERROR_MESSAGES.EXERCISE_NOT_FOUND);
     }
     return found;
@@ -228,8 +232,25 @@ export class ExerciseService {
         comment: data.comment ?? null,
         status: 'GRADED',
         gradedAt: new Date(),
+        ...(data.answerKeyUrls !== undefined ? { answerKeyUrls: data.answerKeyUrls } : {}),
       },
     });
     return graded;
+  }
+
+  /** Gateway gọi trước khi presign tải file: user có liên quan tới file (theo key) không. */
+  async canAccessFileService({
+    key,
+    userId,
+    role,
+  }: {
+    key: string;
+    userId: string;
+    role?: string | null;
+  }): Promise<{ allowed: boolean }> {
+    this.assertUuid(userId, 'User Id');
+    if (!key || key.length > 512) return { allowed: false };
+    const allowed = await this.repo.canAccessFile({ key, userId, role });
+    return { allowed };
   }
 }

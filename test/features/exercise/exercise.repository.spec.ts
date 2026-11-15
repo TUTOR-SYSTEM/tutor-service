@@ -133,7 +133,7 @@ describe('ExerciseRepository', () => {
 
   describe('findAll', () => {
     const baseQuery = { page: 2, limit: 5 } as never;
-    const access = { OR: [{ tutorId: USER_ID }, { studentId: USER_ID }] };
+    const access = { OR: [{ tutorId: USER_ID }, { studentId: USER_ID }, { student: { parentId: USER_ID } }] };
 
     it('returns rows with nested session/class/student and pagination', async () => {
       prisma.exercise.count.mockResolvedValue(7);
