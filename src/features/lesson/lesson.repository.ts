@@ -71,11 +71,10 @@ export class LessonRepository {
     chapterId: string;
     curriculumId: string;
   }): Promise<boolean> {
-    const [row] = await this.db
-      .select({ id: chapters.id })
-      .from(chapters)
-      .where(and(eq(chapters.id, chapterId), eq(chapters.curriculumId, curriculumId)))
-      .limit(1);
+    const row = await this.prisma.chapter.findFirst({
+      where: { id: chapterId, curriculumId },
+      select: { id: true },
+    });
     return !!row;
   }
 

@@ -21,6 +21,7 @@ export type ExerciseDetailDto = {
   studentId: string;
   issueUrls: { name: string; url: string; key: string }[];
   exerciseUrls: { name: string; url: string; key: string }[];
+  answerKeyUrls: { name: string; url: string; key: string }[];
   status: ExerciseStatus;
   score: number | null;
   comment: string | null;

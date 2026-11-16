@@ -353,6 +353,44 @@ describe('ClassService', () => {
       expect(repo.update).not.toHaveBeenCalled();
     });
 
+    it('a tutor cannot enroll a student managed by another tutor (NotFound, nothing synced)', async () => {
+      repo.getClassByField.mockResolvedValue(existing);
+      user.getUserRolesByIds.mockResolvedValue([
+        { id: STUDENT_A, role: 'STUDENT', tutorId: TUTOR_ID },
+        { id: STUDENT_B, role: 'STUDENT', tutorId: '99999999-9999-4999-8999-999999999999' },
+      ]);
+
+      await expect(
+        service.updateClassService({
+          userId: TUTOR_ID,
+          role: 'TUTOR',
+          id: CLASS_ID,
+          data: { studentIds: [STUDENT_A, STUDENT_B] } as never,
+        }),
+      ).rejects.toThrow(NotFoundException);
+      expect(repo.syncStudents).not.toHaveBeenCalled();
+    });
+
+    it('a tutor can enroll students they manage', async () => {
+      repo.getClassByField.mockResolvedValue(existing);
+      repo.update.mockResolvedValue({ ...existing });
+      user.getUserRolesByIds.mockResolvedValue([
+        { id: STUDENT_A, role: 'STUDENT', tutorId: TUTOR_ID },
+        { id: STUDENT_B, role: 'STUDENT', tutorId: TUTOR_ID },
+      ]);
+
+      await service.updateClassService({
+        userId: TUTOR_ID,
+        role: 'TUTOR',
+        id: CLASS_ID,
+        data: { studentIds: [STUDENT_A, STUDENT_B] } as never,
+      });
+      expect(repo.syncStudents).toHaveBeenCalledWith({
+        classId: CLASS_ID,
+        studentIds: [STUDENT_A, STUDENT_B],
+      });
+    });
+
     it('refuses an unknown student id', async () => {
       repo.getClassByField.mockResolvedValue(existing);
       user.getUserRolesByIds.mockResolvedValue([]);

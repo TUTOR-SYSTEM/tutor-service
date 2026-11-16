@@ -11,12 +11,12 @@ import { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { IS_PUBLIC_KEY } from '@packages/decorators';
-import { PrismaService } from 'src/database/prisma.service';
+import { PrismaService } from '../../database/prisma.service';
 import type { Request } from 'express';
 
 import type { JwtUserRole } from '@packages/helpers';
 import { ERROR_MESSAGES } from 'src/data/constants';
-import { RmqProducer } from 'src/features/rabbitmq/rmq.producer';
+import { RmqProducer } from '../../features/rabbitmq/rmq.producer';
 import { resolveJwtAccessSecret } from '../configs/jwt-sign.config';
 
 /** Access-token payload shape (matches access JWTs from `signAccessToken`). */
@@ -81,11 +81,16 @@ function parseAccessPayload(decoded: unknown): JwtGuardUser {
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
+  private readonly logger = new Logger(JwtAuthGuard.name);
+  /** `userId:sid` → epoch ms until which a redis-confirmed session is trusted. */
+  private readonly confirmedSessions = new Map<string, number>();
+
   constructor(
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly reflector: Reflector,
     private readonly prisma: PrismaService,
+    private readonly rmqProducer: RmqProducer,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {

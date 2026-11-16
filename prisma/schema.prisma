@@ -469,6 +469,8 @@ model Exercise {
   studentId    String         @map("student_id") @db.Uuid
   issueUrls    Json?          @default("[]") @map("issue_urls")
   exerciseUrls Json?          @default("[]") @map("exercise_urls")
+  // Đáp án/lời giải gia sư tải lên khi chấm, lưu cùng bài nộp.
+  answerKeyUrls Json?         @default("[]") @map("answer_key_urls")
   status       ExerciseStatus @default(SUBMITTED)
   score        Decimal?       @db.Decimal(5, 2)
   comment      String?
@@ -639,4 +641,115 @@ model TestFixture {
   updatedAt   DateTime? @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
 
   @@map("test_fixtures")
+}
+
+// ─── Course progress (kết quả học tập & test của khoá học VPS) ───────────────
+// Bảng do gateway migrate (drizzle/0006_course_progress.sql); model này chỉ để runtime truy vấn.
+enum CourseItemKind {
+  LAB
+  DEBUG
+
+  @@map("course_item_kind")
+}
+
+model CourseQuizAnswer {
+  userId        String   @map("user_id") @db.Uuid
+  lessonId      String   @map("lesson_id")
+  questionIndex Int      @map("question_index")
+  optionIndex   Int?     @map("option_index")
+  wrongCount    Int      @default(0) @map("wrong_count")
+  flagged       Boolean  @default(false)
+  answeredAt    DateTime @default(now()) @map("answered_at") @db.Timestamp(6)
+
+  @@id([userId, lessonId, questionIndex])
+  @@map("course_quiz_answers")
+}
+
+model CourseQuizAttempt {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  lessonId    String   @map("lesson_id")
+  score       Int
+  total       Int
+  completedAt DateTime @map("completed_at") @db.Timestamp(6)
+
+  @@unique([userId, lessonId, completedAt], map: "course_quiz_attempts_unique")
+  @@map("course_quiz_attempts")
+}
+
+model CourseItemResult {
+  userId   String         @map("user_id") @db.Uuid
+  lessonId String         @map("lesson_id")
+  kind     CourseItemKind
+  itemKey  String         @map("item_key")
+  passedAt DateTime       @default(now()) @map("passed_at") @db.Timestamp(6)
+
+  @@id([userId, lessonId, kind, itemKey])
+  @@map("course_item_results")
+}
+
+model CourseLearningResult {
+  userId        String   @map("user_id") @db.Uuid
+  lessonId      String   @map("lesson_id")
+  quizAttempts  Int      @default(0) @map("quiz_attempts")
+  quizBest      Int?     @map("quiz_best")
+  quizTotal     Int?     @map("quiz_total")
+  quizLastAt    DateTime? @map("quiz_last_at") @db.Timestamp(6)
+  labsPassed    Int      @default(0) @map("labs_passed")
+  labsTotal     Int      @default(0) @map("labs_total")
+  debugsSolved  Int      @default(0) @map("debugs_solved")
+  wrongTotal    Int      @default(0) @map("wrong_total")
+  flagged       Int      @default(0)
+  updatedAt     DateTime @default(now()) @map("updated_at") @db.Timestamp(6)
+
+  @@id([userId, lessonId])
+  @@map("course_learning_results")
+}
+
+// ─── API route check results (tab API Route Checklist) ───────────────────────
+// Bảng do gateway migrate (drizzle/0008_api_route_results.sql); model chỉ để runtime truy vấn.
+model ApiRouteResult {
+  routeId   String   @id @map("route_id")
+  status    String   @default("todo")
+  doc       Json     @default("{}")
+  updatedBy String?  @map("updated_by") @db.Uuid
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamp(6)
+
+  @@map("api_route_results")
+}
+
+// ─── API route catalogue (đọc từ gateway migrate: api_routes, api_catalog) ──────
+model ApiRoute {
+  id        String   @id
+  scanId    String   @map("scan_id")
+  key       String   @unique
+  svc       String
+  module    String
+  type      String
+  method    String
+  path      String
+  handler   String
+  file      String
+  line      Int?
+  auth      String
+  dto       String
+  dev       Boolean  @default(false)
+  flags     Json     @default("[]")
+  details   Json     @default("{}")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+
+  @@map("api_routes")
+}
+
+model ApiCatalog {
+  scanId    String   @id @map("scan_id")
+  scannedAt String   @map("scanned_at")
+  commits   Json     @default("{}")
+  branches  Json     @default("{}")
+  services  Json     @default("{}")
+  sends     Json     @default("[]")
+  orderList Json     @default("[]") @map("order")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+
+  @@map("api_catalog")
 }

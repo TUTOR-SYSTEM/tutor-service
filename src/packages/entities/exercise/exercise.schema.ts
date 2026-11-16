@@ -45,6 +45,8 @@ export const gradeExerciseSchema = z.object({
     .min(0, 'Điểm tối thiểu là 0')
     .max(10, 'Điểm tối đa là 10'),
   comment: z.string().max(2000).optional().nullable(),
+  // Đáp án gia sư tải lên khi chấm (không gửi = giữ nguyên đáp án đã lưu).
+  answerKeyUrls: z.array(fileUrlSchema).max(5).optional(),
 });
 
 export const getExerciseQuerySchema = z.object({

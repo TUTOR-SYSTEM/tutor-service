@@ -40,7 +40,7 @@ export class UserService {
     if (ids.length === 0) return [];
     return this.prisma.user.findMany({
       where: { id: { in: ids } },
-      select: { id: true, role: true },
+      select: { id: true, role: true, tutorId: true },
     });
   }
 }

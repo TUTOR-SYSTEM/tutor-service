@@ -169,10 +169,10 @@ export class ConversationService {
   // every member the creator adds must be a user the creator may chat with (same policy as DM)
   private async assertCanChatWithAll(userId: string, targetIds: string[]) {
     if (targetIds.length === 0) return;
-    const rows = await this.db
-      .select({ id: users.id, role: users.role })
-      .from(users)
-      .where(inArray(users.id, [userId, ...targetIds]));
+    const rows = await this.prisma.user.findMany({
+      where: { id: { in: [userId, ...targetIds] } },
+      select: { id: true, role: true },
+    });
     const roleById = new Map(rows.map((r) => [r.id, r.role ?? 'STUDENT']));
     const actorRole = roleById.get(userId);
     if (!actorRole) throw new NotFoundException('Current user not found');

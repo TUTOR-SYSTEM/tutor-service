@@ -43,4 +43,10 @@ export class ExerciseRpcController {
   grade(@Payload() payload: { userId: string; role?: string; id: string; data: GradeExerciseDto }) {
     return this.exerciseService.gradeExerciseService(payload);
   }
+
+  /** Gateway → kiểm tra quyền tải file trước khi xin presigned URL từ service upload. */
+  @MessagePattern('exercise.fileAccess')
+  fileAccess(@Payload() payload: { key: string; userId: string; role?: string | null }) {
+    return this.exerciseService.canAccessFileService(payload);
+  }
 }
