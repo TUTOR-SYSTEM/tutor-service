@@ -5,6 +5,8 @@ FROM docker.io/node:22-alpine AS builder
 COPY --from=docker.io/oven/bun:1-alpine /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /app
 COPY package.json bun.lock ./
+# postinstall runs `prisma generate`, so the schema must exist before install
+COPY prisma ./prisma
 RUN --mount=type=cache,target=/root/.bun/install/cache \
     bun install --frozen-lockfile
 COPY . .
