@@ -259,6 +259,8 @@ model Class {
   location     String?
   curriculumId String?       @map("curriculum_id") @db.Uuid
   tutorId      String        @map("tutor_id") @db.Uuid
+  /** Sĩ số tối đa: 1 = lớp 1 kèm 1, 10 = lớp nhóm. */
+  maxStudents  Int           @default(10) @map("max_students")
   createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamp(6)
   updatedAt    DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
 

@@ -52,27 +52,75 @@ export class ClassRepository {
         location: data.location,
         curriculumId: data.curriculumId,
         tutorId: data.tutorId,
+        maxStudents: data.maxStudents ?? 10,
       },
     });
   }
 
+  /** Các trường cập nhật được. `undefined` = giữ nguyên; `null` = xoá giá trị (field nullable). */
+  private buildUpdateData(data: Omit<UpdateClassDto, 'studentIds'>) {
+    return {
+      name: data.name,
+      code: data.code,
+      subject: data.subject,
+      tuition: data.tuition?.toString(),
+      description: data.description,
+      status: data.status,
+      format: data.format,
+      startTime: toDate(data.startTime),
+      endTime: toDate(data.endTime),
+      location: data.location,
+      curriculumId: data.curriculumId,
+      tutorId: data.tutorId,
+      maxStudents: data.maxStudents,
+    };
+  }
+
   async update({ id, data }: { id: string; data: Omit<UpdateClassDto, 'studentIds'> }) {
     try {
-      return await this.prisma.class.update({
-        where: { id },
-        data: {
-          name: data.name,
-          code: data.code,
-          subject: data.subject,
-          tuition: data.tuition?.toString(),
-          description: data.description,
-          status: data.status,
-          format: data.format,
-          startTime: toDate(data.startTime),
-          endTime: toDate(data.endTime),
-          location: data.location,
-          curriculumId: data.curriculumId,
-        },
+      return await this.prisma.class.update({ where: { id }, data: this.buildUpdateData(data) });
+    } catch (error) {
+      if (isRecordNotFound(error)) return null;
+      throw error;
+    }
+  }
+
+  /**
+   * Cập nhật lớp và (nếu có `studentIds`) đồng bộ roster trong CÙNG một transaction:
+   * lỗi ở bước nào cũng rollback cả hai. `studentIds` là danh sách đầy đủ sau cập nhật;
+   * `[]` xoá toàn bộ học sinh (`notIn: []` khớp mọi dòng).
+   */
+  async updateWithRoster({
+    id,
+    data,
+    studentIds,
+  }: {
+    id: string;
+    data: Omit<UpdateClassDto, 'studentIds'>;
+    studentIds?: string[];
+  }) {
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const updated = await tx.class.update({ where: { id }, data: this.buildUpdateData(data) });
+        if (studentIds) {
+          await tx.classStudent.deleteMany({
+            where: { classId: id, studentId: { notIn: studentIds } },
+          });
+          await tx.classStudent.createMany({
+            data: studentIds.map((studentId) => ({ classId: id, studentId })),
+            skipDuplicates: true,
+          });
+        }
+        // Gia sư học sinh luôn theo gia sư lớp: đồng bộ khi đổi gia sư lớp hoặc roster.
+        if (studentIds || data.tutorId !== undefined) {
+          const roster = studentIds
+            ? studentIds
+            : (
+                await tx.classStudent.findMany({ where: { classId: id }, select: { studentId: true } })
+              ).map((row) => row.studentId);
+          await this.syncStudentsTutor(tx, roster, updated.tutorId);
+        }
+        return updated;
       });
     } catch (error) {
       if (isRecordNotFound(error)) return null;
@@ -80,18 +128,52 @@ export class ClassRepository {
     }
   }
 
-  // reconcile a class's enrolled students to exactly `studentIds`: remove students no longer
-  // in the list, insert the ones newly added (duplicates skipped via the unique index).
-  async syncStudents({ classId, studentIds }: { classId: string; studentIds: string[] }) {
-    await this.prisma.$transaction([
-      this.prisma.classStudent.deleteMany({
-        where: { classId, studentId: { notIn: studentIds } },
-      }),
-      this.prisma.classStudent.createMany({
-        data: studentIds.map((studentId) => ({ classId, studentId })),
-        skipDuplicates: true,
-      }),
-    ]);
+  /**
+   * Quy tắc: gia sư quản lý học sinh = gia sư của lớp học sinh tham gia.
+   * Trả về id học sinh (trong `studentIds`) đang thuộc một lớp khác có gia sư ≠ `tutorId`.
+   */
+  async findStudentIdsWithOtherTutor({
+    studentIds,
+    tutorId,
+    excludeClassId,
+  }: {
+    studentIds: string[];
+    tutorId: string;
+    excludeClassId?: string;
+  }): Promise<string[]> {
+    if (studentIds.length === 0) return [];
+    const rows = await this.prisma.classStudent.findMany({
+      where: {
+        studentId: { in: studentIds },
+        ...(excludeClassId ? { classId: { not: excludeClassId } } : {}),
+        class: { tutorId: { not: tutorId } },
+      },
+      select: { studentId: true },
+      distinct: ['studentId'],
+    });
+    return rows.map((row) => row.studentId);
+  }
+
+  /** Gán gia sư quản lý cho các học sinh (chỉ role STUDENT). */
+  private async syncStudentsTutor(
+    tx: Prisma.TransactionClient,
+    studentIds: string[],
+    tutorId: string,
+  ) {
+    if (studentIds.length === 0) return;
+    await tx.user.updateMany({
+      where: { id: { in: studentIds }, role: 'STUDENT' },
+      data: { tutorId },
+    });
+  }
+
+  /** Id học sinh đang thuộc lớp (không kèm thông tin cá nhân). */
+  async getRosterStudentIds({ classId }: { classId: string }) {
+    const rows = await this.prisma.classStudent.findMany({
+      where: { classId },
+      select: { studentId: true },
+    });
+    return rows.map((row) => row.studentId);
   }
 
   async getClasses({
@@ -103,7 +185,7 @@ export class ClassRepository {
     role?: string;
     query: GetClassesQueryDto;
   }) {
-    const { page = 1, limit = 10, search, status, subject, studentsId } = query;
+    const { page = 1, limit = 10, search, status, subject, studentsId, tutorId } = query;
 
     const searchWhere = buildListWhereClause({
       search,
@@ -116,6 +198,9 @@ export class ClassRepository {
       scopeWhere = { students: { some: { studentId: userId } } };
     } else if (role === 'PARENT') {
       scopeWhere = { students: { some: { student: { parentId: userId } } } };
+    } else if (role === 'ADMIN') {
+      // ADMIN: mọi lớp, hoặc chỉ lớp của gia sư được chọn.
+      scopeWhere = tutorId ? { tutorId } : {};
     } else {
       scopeWhere = { tutorId: userId };
     }
@@ -183,11 +268,24 @@ export class ClassRepository {
 
   // enroll one or many students into a class; duplicates (already enrolled) are skipped
   // via the (class_id, student_id) unique index and simply not returned.
-  async addStudents({ classId, studentIds }: { classId: string; studentIds: string[] }) {
+  /** Thêm học sinh vào lớp và gán gia sư lớp cho họ, trong cùng một transaction. */
+  async addStudents({
+    classId,
+    studentIds,
+    tutorId,
+  }: {
+    classId: string;
+    studentIds: string[];
+    tutorId: string;
+  }) {
     if (studentIds.length === 0) return [];
-    return this.prisma.classStudent.createManyAndReturn({
-      data: studentIds.map((studentId) => ({ classId, studentId })),
-      skipDuplicates: true,
+    return this.prisma.$transaction(async (tx) => {
+      const inserted = await tx.classStudent.createManyAndReturn({
+        data: studentIds.map((studentId) => ({ classId, studentId })),
+        skipDuplicates: true,
+      });
+      await this.syncStudentsTutor(tx, studentIds, tutorId);
+      return inserted;
     });
   }
 

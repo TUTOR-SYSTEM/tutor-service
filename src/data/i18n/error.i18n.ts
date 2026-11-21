@@ -125,6 +125,18 @@ export const ERROR_TRANSLATIONS = {
   // Class
   CLASS_NAME_EXISTS: { vi: 'Tên lớp học đã tồn tại', en: 'Class name already exists' },
   CLASS_CODE_EXISTS: { vi: 'Mã lớp học đã tồn tại', en: 'Class code already exists' },
+  CLASS_END_BEFORE_START: {
+    vi: 'Thời gian kết thúc phải sau thời gian bắt đầu',
+    en: 'End time must be after start time',
+  },
+  CLASS_TUTOR_CONFLICT: {
+    vi: 'Học sinh đang học lớp của gia sư khác nên không thể thêm vào lớp này. Hãy chuyển học sinh khỏi lớp đó trước.',
+    en: 'The student is enrolled in a class of another tutor; remove them from that class first',
+  },
+  CLASS_CAPACITY_EXCEEDED: {
+    vi: 'Số học sinh vượt quá sĩ số tối đa của lớp',
+    en: 'Number of students exceeds the class capacity',
+  },
   CLASS_NOT_FOUND: { vi: 'Không tìm thấy lớp học', en: 'Class not found' },
   CLASS_HAS_TUITION_HISTORY: {
     vi: 'Lớp còn lịch sử học phí, không thể xoá',

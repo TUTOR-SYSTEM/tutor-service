@@ -20,6 +20,9 @@ import { canActOnOwned, checkUuidValid, generateCode } from '@packages/helpers';
 import { UserService } from '../user/user.service';
 import { ERROR_MESSAGES } from 'src/data/constants';
 
+/** Sĩ số mặc định của lớp nhóm (lớp 1 kèm 1 là 1). */
+const DEFAULT_MAX_STUDENTS = 10;
+
 @Injectable()
 export class ClassService {
   private readonly logger = new Logger(ClassService.name);
@@ -57,7 +60,8 @@ export class ClassService {
       if (!row) throw new BadRequestException(`${ERROR_MESSAGES.STUDENT_NOT_FOUND}: ${id}`);
       if (row.role !== 'STUDENT')
         throw new BadRequestException(`${ERROR_MESSAGES.USER_NOT_A_STUDENT}: ${id}`);
-      if (actor.role === 'TUTOR' && row.tutorId !== actor.userId)
+      // Tutor chỉ thêm học sinh mình quản lý, hoặc học sinh chưa có gia sư (sẽ được gán cho mình).
+      if (actor.role === 'TUTOR' && row.tutorId && row.tutorId !== actor.userId)
         throw new NotFoundException(`${ERROR_MESSAGES.STUDENT_NOT_FOUND}: ${id}`);
     }
   }
@@ -106,6 +110,9 @@ export class ClassService {
     if (tutorRow.role !== 'TUTOR' && tutorRow.role !== 'ADMIN') {
       throw new BadRequestException(ERROR_MESSAGES.TUTOR_NOT_FOUND);
     }
+    if (data.endTime <= data.startTime) {
+      throw new BadRequestException(ERROR_MESSAGES.CLASS_END_BEFORE_START);
+    }
 
     try {
       return await this.repo.create({ data });
@@ -153,16 +160,67 @@ export class ClassService {
         throw new BadRequestException(ERROR_MESSAGES.CLASS_CODE_EXISTS);
     }
 
-    const { studentIds, ...classFields } = data;
-
-    if (studentIds) {
-      const uniqueIds = [...new Set(studentIds)];
-      await this.assertAllStudents(uniqueIds, { userId, role });
-      await this.repo.syncStudents({ classId: id, studentIds: uniqueIds });
+    // Đổi gia sư quản lý lớp: chỉ ADMIN, và gia sư đích phải là TUTOR/ADMIN (như khi tạo lớp).
+    if (data.tutorId !== undefined && data.tutorId !== classData.tutorId) {
+      if (role !== 'ADMIN') throw new ForbiddenException(ERROR_MESSAGES.PERMISSION_DENIED);
+      const newTutor = await this.user.getUserRoleById(data.tutorId);
+      if (!newTutor || (newTutor.role !== 'TUTOR' && newTutor.role !== 'ADMIN')) {
+        throw new BadRequestException(ERROR_MESSAGES.TUTOR_NOT_FOUND);
+      }
     }
 
-    const updated = await this.repo.update({ id, data: classFields });
-    return updated ?? classData;
+    // Kiểm tra khoảng thời gian trên giá trị sau cập nhật (chỉ khi người dùng sửa thời gian).
+    if (data.startTime !== undefined || data.endTime !== undefined) {
+      const startTime = data.startTime ?? classData.startTime;
+      const endTime = data.endTime ?? classData.endTime;
+      if (new Date(endTime) <= new Date(startTime)) {
+        throw new BadRequestException(ERROR_MESSAGES.CLASS_END_BEFORE_START);
+      }
+    }
+
+    const { studentIds, ...classFields } = data;
+    const uniqueIds = studentIds ? [...new Set(studentIds)] : undefined;
+    const maxStudents = data.maxStudents ?? classData.maxStudents ?? DEFAULT_MAX_STUDENTS;
+
+    // Sĩ số sau cập nhật: danh sách mới nếu có studentIds, ngược lại là roster hiện tại.
+    // Roster hiện tại chỉ cần đọc khi có thay đổi roster, sĩ số hoặc gia sư lớp.
+    const tutorChanged = data.tutorId !== undefined && data.tutorId !== classData.tutorId;
+    const needRoster = uniqueIds !== undefined || data.maxStudents !== undefined || tutorChanged;
+    const currentIds = needRoster
+      ? new Set((await this.repo.getRosterStudentIds({ classId: id })) ?? [])
+      : new Set<string>();
+    const finalCount = uniqueIds ? uniqueIds.length : currentIds.size;
+    if (finalCount > maxStudents) {
+      throw new BadRequestException(ERROR_MESSAGES.CLASS_CAPACITY_EXCEEDED);
+    }
+
+    // Chỉ kiểm tra học sinh MỚI thêm vào; học sinh đã thuộc lớp giữ nguyên.
+    if (uniqueIds) {
+      const added = uniqueIds.filter((sid) => !currentIds.has(sid));
+      await this.assertAllStudents(added, { userId, role });
+    }
+
+    // Quy tắc gia sư: sau cập nhật, mọi học sinh của lớp phải không thuộc lớp nào của gia sư khác.
+    if (uniqueIds || tutorChanged) {
+      const finalTutorId = data.tutorId ?? classData.tutorId;
+      const finalRoster = uniqueIds ?? [...currentIds];
+      const conflicts = await this.repo.findStudentIdsWithOtherTutor({
+        studentIds: finalRoster,
+        tutorId: finalTutorId,
+        excludeClassId: id,
+      });
+      if (conflicts.length > 0) {
+        throw new BadRequestException(ERROR_MESSAGES.CLASS_TUTOR_CONFLICT);
+      }
+    }
+
+    const updated = await this.repo.updateWithRoster({
+      id,
+      data: classFields,
+      studentIds: uniqueIds,
+    });
+    if (!updated) throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
+    return updated;
   }
 
   async getClassesService({
@@ -331,7 +389,29 @@ export class ClassService {
     const studentIds = [...new Set(data.studentIds)];
     await this.assertAllStudents(studentIds, { userId, role });
 
-    const inserted = await this.repo.addStudents({ classId, studentIds });
+    // không vượt sĩ số tối đa (chỉ tính học sinh chưa thuộc lớp)
+    const roster = new Set((await this.repo.getRosterStudentIds({ classId })) ?? []);
+    const newcomers = studentIds.filter((sid) => !roster.has(sid));
+    const maxStudents = classData.maxStudents ?? DEFAULT_MAX_STUDENTS;
+    if (roster.size + newcomers.length > maxStudents) {
+      throw new BadRequestException(ERROR_MESSAGES.CLASS_CAPACITY_EXCEEDED);
+    }
+
+    // Quy tắc gia sư: học sinh đang thuộc lớp của gia sư khác thì không thêm được.
+    const conflicts = await this.repo.findStudentIdsWithOtherTutor({
+      studentIds,
+      tutorId: classData.tutorId,
+      excludeClassId: classId,
+    });
+    if (conflicts.length > 0) {
+      throw new BadRequestException(ERROR_MESSAGES.CLASS_TUTOR_CONFLICT);
+    }
+
+    const inserted = await this.repo.addStudents({
+      classId,
+      studentIds,
+      tutorId: classData.tutorId,
+    });
     const addedIds = inserted.map((row) => row.studentId);
 
     return {
