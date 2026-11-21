@@ -17,6 +17,7 @@ export type ClassDetailDto = {
   code: string;
   subject: string;
   tuition: string;
+  maxStudents: number;
   description: string | null;
   status: 'OPEN' | 'CLOSED' | 'UPCOMING';
   format: 'ONLINE' | 'OFFLINE';

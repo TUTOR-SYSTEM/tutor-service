@@ -34,7 +34,9 @@ describe('ClassService', () => {
       getClassByField: jest.fn().mockResolvedValue(null),
       create: jest.fn(),
       update: jest.fn(),
-      syncStudents: jest.fn(),
+      updateWithRoster: jest.fn(),
+      getRosterStudentIds: jest.fn().mockResolvedValue([]),
+      findStudentIdsWithOtherTutor: jest.fn().mockResolvedValue([]),
       getClasses: jest.fn(),
       getClass: jest.fn(),
       getAllStudent: jest.fn(),
@@ -75,6 +77,20 @@ describe('ClassService', () => {
         service.createClassService({ userId: TUTOR_ID, data: createDto }),
       ).resolves.toEqual({ id: CLASS_ID });
       expect(repo.create).toHaveBeenCalledWith({ data: createDto });
+    });
+
+    it('rejects an end time that is not after the start time before inserting', async () => {
+      await expect(
+        service.createClassService({
+          userId: TUTOR_ID,
+          data: {
+            ...createDto,
+            startTime: new Date('2026-09-01T10:00:00Z'),
+            endTime: new Date('2026-09-01T10:00:00Z'),
+          },
+        }),
+      ).rejects.toThrow(new BadRequestException(ERROR_MESSAGES.CLASS_END_BEFORE_START));
+      expect(repo.create).not.toHaveBeenCalled();
     });
 
     it('rejects a duplicate name before inserting', async () => {
@@ -217,7 +233,7 @@ describe('ClassService', () => {
 
     it('lets ADMIN update a class owned by another tutor', async () => {
       repo.getClassByField.mockResolvedValue(OWNED);
-      repo.update.mockResolvedValue({ ...OWNED, subject: 'Math' });
+      repo.updateWithRoster.mockResolvedValue({ ...OWNED, subject: 'Math' });
 
       await expect(
         service.updateClassService({
@@ -256,7 +272,7 @@ describe('ClassService', () => {
       await expect(
         service.updateClassService({ userId: TUTOR_ID, id: CLASS_ID, data: {} as never }),
       ).rejects.toThrow(new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND));
-      expect(repo.update).not.toHaveBeenCalled();
+      expect(repo.updateWithRoster).not.toHaveBeenCalled();
     });
 
     it('rejects renaming to a name owned by a different class', async () => {
@@ -285,12 +301,12 @@ describe('ClassService', () => {
           data: { code: 'TAKEN' } as never,
         }),
       ).rejects.toThrow(new BadRequestException(ERROR_MESSAGES.CLASS_CODE_EXISTS));
-      expect(repo.update).not.toHaveBeenCalled();
+      expect(repo.updateWithRoster).not.toHaveBeenCalled();
     });
 
     it('allows keeping the same code without a lookup that clashes with itself', async () => {
       repo.getClassByField.mockResolvedValue(existing);
-      repo.update.mockResolvedValue(existing);
+      repo.updateWithRoster.mockResolvedValue(existing);
 
       await service.updateClassService({
         userId: TUTOR_ID,
@@ -306,7 +322,7 @@ describe('ClassService', () => {
 
     it('allows keeping the same name (no lookup clash with itself)', async () => {
       repo.getClassByField.mockResolvedValue(existing);
-      repo.update.mockResolvedValue({ ...existing, name: 'Old' });
+      repo.updateWithRoster.mockResolvedValue({ ...existing, name: 'Old' });
 
       await expect(
         service.updateClassService({
@@ -319,7 +335,7 @@ describe('ClassService', () => {
 
     it('validates student roles, dedupes ids, and syncs the roster before updating', async () => {
       repo.getClassByField.mockResolvedValue(existing);
-      repo.update.mockResolvedValue({ ...existing });
+      repo.updateWithRoster.mockResolvedValue({ ...existing });
 
       await service.updateClassService({
         userId: TUTOR_ID,
@@ -328,11 +344,11 @@ describe('ClassService', () => {
       });
 
       expect(user.getUserRolesByIds).toHaveBeenCalledWith([STUDENT_A, STUDENT_B]);
-      expect(repo.syncStudents).toHaveBeenCalledWith({
-        classId: CLASS_ID,
+      expect(repo.updateWithRoster).toHaveBeenCalledWith({
+        id: CLASS_ID,
+        data: { name: 'Old' },
         studentIds: [STUDENT_A, STUDENT_B],
       });
-      expect(repo.update).toHaveBeenCalledWith({ id: CLASS_ID, data: { name: 'Old' } });
     });
 
     it('refuses a student list containing a non-student and does not sync', async () => {
@@ -349,8 +365,8 @@ describe('ClassService', () => {
           data: { studentIds: [STUDENT_A, STUDENT_B] } as never,
         }),
       ).rejects.toThrow(BadRequestException);
-      expect(repo.syncStudents).not.toHaveBeenCalled();
-      expect(repo.update).not.toHaveBeenCalled();
+      expect(repo.updateWithRoster).not.toHaveBeenCalled();
+      expect(repo.updateWithRoster).not.toHaveBeenCalled();
     });
 
     it('a tutor cannot enroll a student managed by another tutor (NotFound, nothing synced)', async () => {
@@ -368,12 +384,12 @@ describe('ClassService', () => {
           data: { studentIds: [STUDENT_A, STUDENT_B] } as never,
         }),
       ).rejects.toThrow(NotFoundException);
-      expect(repo.syncStudents).not.toHaveBeenCalled();
+      expect(repo.updateWithRoster).not.toHaveBeenCalled();
     });
 
     it('a tutor can enroll students they manage', async () => {
       repo.getClassByField.mockResolvedValue(existing);
-      repo.update.mockResolvedValue({ ...existing });
+      repo.updateWithRoster.mockResolvedValue({ ...existing });
       user.getUserRolesByIds.mockResolvedValue([
         { id: STUDENT_A, role: 'STUDENT', tutorId: TUTOR_ID },
         { id: STUDENT_B, role: 'STUDENT', tutorId: TUTOR_ID },
@@ -385,10 +401,69 @@ describe('ClassService', () => {
         id: CLASS_ID,
         data: { studentIds: [STUDENT_A, STUDENT_B] } as never,
       });
-      expect(repo.syncStudents).toHaveBeenCalledWith({
-        classId: CLASS_ID,
+      expect(repo.updateWithRoster).toHaveBeenCalledWith({
+        id: CLASS_ID,
+        data: {},
         studentIds: [STUDENT_A, STUDENT_B],
       });
+    });
+
+    it('refuses a roster containing a student enrolled in another tutor\'s class (nothing written)', async () => {
+      repo.getClassByField.mockResolvedValue(existing);
+      repo.findStudentIdsWithOtherTutor.mockResolvedValue([STUDENT_B]);
+      user.getUserRolesByIds.mockResolvedValue([{ id: STUDENT_A, role: 'STUDENT', tutorId: TUTOR_ID }]);
+
+      await expect(
+        service.updateClassService({
+          userId: TUTOR_ID,
+          role: 'TUTOR',
+          id: CLASS_ID,
+          data: { studentIds: [STUDENT_A] } as never,
+        }),
+      ).rejects.toThrow(new BadRequestException(ERROR_MESSAGES.CLASS_TUTOR_CONFLICT));
+      expect(repo.findStudentIdsWithOtherTutor).toHaveBeenCalledWith({
+        studentIds: [STUDENT_A],
+        tutorId: TUTOR_ID,
+        excludeClassId: CLASS_ID,
+      });
+      expect(repo.updateWithRoster).not.toHaveBeenCalled();
+    });
+
+    it('checks the whole roster against the NEW tutor when an admin reassigns the class', async () => {
+      repo.getClassByField.mockResolvedValue(existing);
+      repo.getRosterStudentIds.mockResolvedValue([STUDENT_A]);
+      repo.findStudentIdsWithOtherTutor.mockResolvedValue([STUDENT_A]);
+      user.getUserRoleById.mockResolvedValue({ id: OTHER_TUTOR_ID, role: 'TUTOR' });
+
+      await expect(
+        service.updateClassService({
+          userId: TUTOR_ID,
+          role: 'ADMIN',
+          id: CLASS_ID,
+          data: { tutorId: OTHER_TUTOR_ID } as never,
+        }),
+      ).rejects.toThrow(new BadRequestException(ERROR_MESSAGES.CLASS_TUTOR_CONFLICT));
+      expect(repo.findStudentIdsWithOtherTutor).toHaveBeenCalledWith({
+        studentIds: [STUDENT_A],
+        tutorId: OTHER_TUTOR_ID,
+        excludeClassId: CLASS_ID,
+      });
+      expect(repo.updateWithRoster).not.toHaveBeenCalled();
+    });
+
+    it('lets a tutor enroll a student who has no tutor yet (they become the class tutor)', async () => {
+      repo.getClassByField.mockResolvedValue(existing);
+      repo.updateWithRoster.mockResolvedValue({ ...existing });
+      user.getUserRolesByIds.mockResolvedValue([{ id: STUDENT_A, role: 'STUDENT', tutorId: null }]);
+
+      await expect(
+        service.updateClassService({
+          userId: TUTOR_ID,
+          role: 'TUTOR',
+          id: CLASS_ID,
+          data: { studentIds: [STUDENT_A] } as never,
+        }),
+      ).resolves.toBeDefined();
     });
 
     it('refuses an unknown student id', async () => {
@@ -406,13 +481,169 @@ describe('ClassService', () => {
       );
     });
 
-    it('falls back to the existing row when the repository returns nothing', async () => {
+    it('throws NotFound when the class disappears during the update (no silent stale result)', async () => {
       repo.getClassByField.mockResolvedValue(existing);
-      repo.update.mockResolvedValue(undefined);
+      repo.updateWithRoster.mockResolvedValue(null);
 
       await expect(
         service.updateClassService({ userId: TUTOR_ID, id: CLASS_ID, data: {} as never }),
-      ).resolves.toEqual(existing);
+      ).rejects.toThrow(new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND));
+    });
+
+    it('leaves the roster untouched when studentIds is omitted', async () => {
+      repo.getClassByField.mockResolvedValue(existing);
+      repo.updateWithRoster.mockResolvedValue({ ...existing });
+
+      await service.updateClassService({
+        userId: TUTOR_ID,
+        id: CLASS_ID,
+        data: { name: 'Old' } as never,
+      });
+
+      expect(repo.updateWithRoster).toHaveBeenCalledWith({
+        id: CLASS_ID,
+        data: { name: 'Old' },
+        studentIds: undefined,
+      });
+      expect(user.getUserRolesByIds).not.toHaveBeenCalled();
+    });
+
+    it('does not re-check students that are already in the class (only newcomers are validated)', async () => {
+      repo.getClassByField.mockResolvedValue(existing);
+      repo.getRosterStudentIds.mockResolvedValue([STUDENT_A]);
+      repo.updateWithRoster.mockResolvedValue({ ...existing });
+      user.getUserRolesByIds.mockResolvedValue([{ id: STUDENT_B, role: 'STUDENT', tutorId: TUTOR_ID }]);
+
+      await service.updateClassService({
+        userId: TUTOR_ID,
+        role: 'TUTOR',
+        id: CLASS_ID,
+        data: { studentIds: [STUDENT_A, STUDENT_B] } as never,
+      });
+
+      // STUDENT_A đã thuộc lớp nên không kiểm tra lại (dù thuộc gia sư khác)
+      expect(user.getUserRolesByIds).toHaveBeenCalledWith([STUDENT_B]);
+    });
+
+    it('rejects a roster larger than the class capacity before writing anything', async () => {
+      repo.getClassByField.mockResolvedValue({ ...existing, maxStudents: 1 });
+
+      await expect(
+        service.updateClassService({
+          userId: TUTOR_ID,
+          id: CLASS_ID,
+          data: { studentIds: [STUDENT_A, STUDENT_B] } as never,
+        }),
+      ).rejects.toThrow(new BadRequestException(ERROR_MESSAGES.CLASS_CAPACITY_EXCEEDED));
+      expect(repo.updateWithRoster).not.toHaveBeenCalled();
+    });
+
+    it('rejects lowering maxStudents below the current roster size', async () => {
+      repo.getClassByField.mockResolvedValue({ ...existing, maxStudents: 10 });
+      repo.getRosterStudentIds.mockResolvedValue([STUDENT_A, STUDENT_B]);
+
+      await expect(
+        service.updateClassService({
+          userId: TUTOR_ID,
+          id: CLASS_ID,
+          data: { maxStudents: 1 } as never,
+        }),
+      ).rejects.toThrow(new BadRequestException(ERROR_MESSAGES.CLASS_CAPACITY_EXCEEDED));
+      expect(repo.updateWithRoster).not.toHaveBeenCalled();
+    });
+
+    it('rejects an end time that is not after the start time (using stored start when only end is sent)', async () => {
+      repo.getClassByField.mockResolvedValue({
+        ...existing,
+        startTime: new Date('2026-09-01T10:00:00Z'),
+        endTime: new Date('2026-09-01T11:00:00Z'),
+      });
+
+      await expect(
+        service.updateClassService({
+          userId: TUTOR_ID,
+          id: CLASS_ID,
+          data: { endTime: new Date('2026-09-01T09:00:00Z') } as never,
+        }),
+      ).rejects.toThrow(new BadRequestException(ERROR_MESSAGES.CLASS_END_BEFORE_START));
+      expect(repo.updateWithRoster).not.toHaveBeenCalled();
+    });
+
+    it('does not re-check the time window when the update does not touch times', async () => {
+      repo.getClassByField.mockResolvedValue({
+        ...existing,
+        startTime: new Date('2026-09-01T10:00:00Z'),
+        endTime: new Date('2026-09-01T09:00:00Z'), // dữ liệu cũ lỗi, không chặn sửa các trường khác
+      });
+      repo.updateWithRoster.mockResolvedValue({ ...existing });
+
+      await expect(
+        service.updateClassService({ userId: TUTOR_ID, id: CLASS_ID, data: { subject: 'Math' } as never }),
+      ).resolves.toBeDefined();
+    });
+
+    it('passes null through to clear nullable fields', async () => {
+      repo.getClassByField.mockResolvedValue(existing);
+      repo.updateWithRoster.mockResolvedValue({ ...existing });
+
+      await service.updateClassService({
+        userId: TUTOR_ID,
+        id: CLASS_ID,
+        data: { description: null, location: null, curriculumId: null } as never,
+      });
+
+      expect(repo.updateWithRoster).toHaveBeenCalledWith({
+        id: CLASS_ID,
+        data: { description: null, location: null, curriculumId: null },
+        studentIds: undefined,
+      });
+    });
+
+    it('lets ADMIN reassign the class to another tutor', async () => {
+      repo.getClassByField.mockResolvedValue(existing);
+      repo.updateWithRoster.mockResolvedValue({ ...existing });
+      user.getUserRoleById.mockResolvedValue({ id: OTHER_TUTOR_ID, role: 'TUTOR' });
+
+      await service.updateClassService({
+        userId: TUTOR_ID,
+        role: 'ADMIN',
+        id: CLASS_ID,
+        data: { tutorId: OTHER_TUTOR_ID } as never,
+      });
+
+      expect(repo.updateWithRoster).toHaveBeenCalledWith({
+        id: CLASS_ID,
+        data: { tutorId: OTHER_TUTOR_ID },
+        studentIds: undefined,
+      });
+    });
+
+    it('forbids a plain TUTOR from reassigning the class', async () => {
+      repo.getClassByField.mockResolvedValue(existing);
+
+      await expect(
+        service.updateClassService({
+          userId: TUTOR_ID,
+          role: 'TUTOR',
+          id: CLASS_ID,
+          data: { tutorId: OTHER_TUTOR_ID } as never,
+        }),
+      ).rejects.toThrow(new ForbiddenException(ERROR_MESSAGES.PERMISSION_DENIED));
+      expect(repo.updateWithRoster).not.toHaveBeenCalled();
+    });
+
+    it('rejects reassigning to a user who is not a tutor', async () => {
+      repo.getClassByField.mockResolvedValue(existing);
+      user.getUserRoleById.mockResolvedValue({ id: OTHER_TUTOR_ID, role: 'STUDENT' });
+
+      await expect(
+        service.updateClassService({
+          userId: TUTOR_ID,
+          role: 'ADMIN',
+          id: CLASS_ID,
+          data: { tutorId: OTHER_TUTOR_ID } as never,
+        }),
+      ).rejects.toThrow(new BadRequestException(ERROR_MESSAGES.TUTOR_NOT_FOUND));
     });
   });
 
@@ -650,6 +881,27 @@ describe('ClassService', () => {
       expect(repo.addStudents).not.toHaveBeenCalled();
     });
 
+    it('rejects an addition that would exceed the class capacity', async () => {
+      repo.getClassByField.mockResolvedValue({ id: CLASS_ID, tutorId: TUTOR_ID, maxStudents: 1 });
+      repo.getRosterStudentIds.mockResolvedValue([STUDENT_B]);
+
+      await expect(service.addStudentsService(input([STUDENT_A]))).rejects.toThrow(
+        new BadRequestException(ERROR_MESSAGES.CLASS_CAPACITY_EXCEEDED),
+      );
+      expect(repo.addStudents).not.toHaveBeenCalled();
+    });
+
+    it('does not count already-enrolled students against the capacity', async () => {
+      repo.getClassByField.mockResolvedValue({ id: CLASS_ID, tutorId: TUTOR_ID, maxStudents: 1 });
+      repo.getRosterStudentIds.mockResolvedValue([STUDENT_A]);
+      repo.addStudents.mockResolvedValue([]);
+
+      await expect(service.addStudentsService(input([STUDENT_A]))).resolves.toMatchObject({
+        added: 0,
+        skipped: 1,
+      });
+    });
+
     it('dedupes the requested ids before validating and inserting them', async () => {
       repo.getClassByField.mockResolvedValue({ id: CLASS_ID, tutorId: TUTOR_ID });
       repo.addStudents.mockResolvedValue([{ studentId: STUDENT_A }, { studentId: STUDENT_B }]);
@@ -660,6 +912,7 @@ describe('ClassService', () => {
       expect(repo.addStudents).toHaveBeenCalledWith({
         classId: CLASS_ID,
         studentIds: [STUDENT_A, STUDENT_B],
+        tutorId: TUTOR_ID,
       });
       expect(result).toEqual({
         classId: CLASS_ID,
@@ -681,6 +934,16 @@ describe('ClassService', () => {
         skipped: 1,
         studentIds: [STUDENT_B],
       });
+    });
+
+    it('refuses students enrolled in another tutor\'s class (nothing inserted)', async () => {
+      repo.getClassByField.mockResolvedValue({ id: CLASS_ID, tutorId: TUTOR_ID, maxStudents: 10 });
+      repo.findStudentIdsWithOtherTutor.mockResolvedValue([STUDENT_B]);
+
+      await expect(service.addStudentsService(input([STUDENT_A, STUDENT_B]))).rejects.toThrow(
+        new BadRequestException(ERROR_MESSAGES.CLASS_TUTOR_CONFLICT),
+      );
+      expect(repo.addStudents).not.toHaveBeenCalled();
     });
 
     it('does not insert anything when a listed id is not a student', async () => {

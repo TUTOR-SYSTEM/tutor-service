@@ -168,10 +168,21 @@ describe('ClassRepository', () => {
     });
   });
 
-  describe('syncStudents', () => {
-    it('removes students not in the list, then inserts the rest ignoring duplicates', async () => {
-      await repo.syncStudents({ classId: CLASS_ID, studentIds: [STUDENT_ID, STUDENT_ID_2] });
+  describe('updateWithRoster', () => {
+    it('updates the class and reconciles the roster inside one transaction', async () => {
+      prisma.class.update.mockResolvedValue({ id: CLASS_ID });
 
+      await repo.updateWithRoster({
+        id: CLASS_ID,
+        data: { name: 'New' } as never,
+        studentIds: [STUDENT_ID, STUDENT_ID_2],
+      });
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(prisma.class.update).toHaveBeenCalledWith({
+        where: { id: CLASS_ID },
+        data: expect.objectContaining({ name: 'New' }),
+      });
       expect(prisma.classStudent.deleteMany).toHaveBeenCalledWith({
         where: { classId: CLASS_ID, studentId: { notIn: [STUDENT_ID, STUDENT_ID_2] } },
       });
@@ -182,19 +193,101 @@ describe('ClassRepository', () => {
         ],
         skipDuplicates: true,
       });
-      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('leaves the roster alone when studentIds is omitted', async () => {
+      prisma.class.update.mockResolvedValue({ id: CLASS_ID });
+
+      await repo.updateWithRoster({ id: CLASS_ID, data: { name: 'New' } as never });
+
+      expect(prisma.classStudent.deleteMany).not.toHaveBeenCalled();
+      expect(prisma.classStudent.createMany).not.toHaveBeenCalled();
     });
 
     it('with an empty list clears the whole class enrollment', async () => {
-      await repo.syncStudents({ classId: CLASS_ID, studentIds: [] });
+      prisma.class.update.mockResolvedValue({ id: CLASS_ID });
+
+      await repo.updateWithRoster({ id: CLASS_ID, data: {} as never, studentIds: [] });
 
       // `notIn: []` matches every row, so every enrollment of the class is removed
       expect(prisma.classStudent.deleteMany).toHaveBeenCalledWith({
         where: { classId: CLASS_ID, studentId: { notIn: [] } },
       });
-      expect(prisma.classStudent.createMany).toHaveBeenCalledWith({
-        data: [],
-        skipDuplicates: true,
+    });
+
+    it('returns null when the class does not exist', async () => {
+      prisma.class.update.mockRejectedValue(notFound());
+
+      await expect(
+        repo.updateWithRoster({ id: CLASS_ID, data: {} as never, studentIds: [STUDENT_ID] }),
+      ).resolves.toBeNull();
+    });
+  });
+
+  describe('tutor rule (students follow their class tutor)', () => {
+    it('updateWithRoster assigns the class tutor to the final roster inside the transaction', async () => {
+      prisma.class.update.mockResolvedValue({ id: CLASS_ID, tutorId: USER_ID });
+
+      await repo.updateWithRoster({
+        id: CLASS_ID,
+        data: { tutorId: USER_ID } as never,
+        studentIds: [STUDENT_ID, STUDENT_ID_2],
+      });
+
+      expect(prisma.user.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: [STUDENT_ID, STUDENT_ID_2] }, role: 'STUDENT' },
+        data: { tutorId: USER_ID },
+      });
+    });
+
+    it('addStudents assigns the class tutor to the added students in one transaction', async () => {
+      prisma.classStudent.createManyAndReturn.mockResolvedValue([{ studentId: STUDENT_ID }]);
+
+      await repo.addStudents({ classId: CLASS_ID, studentIds: [STUDENT_ID], tutorId: USER_ID });
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(prisma.user.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: [STUDENT_ID] }, role: 'STUDENT' },
+        data: { tutorId: USER_ID },
+      });
+    });
+
+    it('findStudentIdsWithOtherTutor looks for enrollments in classes of a different tutor', async () => {
+      prisma.classStudent.findMany.mockResolvedValue([{ studentId: STUDENT_ID }]);
+
+      await expect(
+        repo.findStudentIdsWithOtherTutor({
+          studentIds: [STUDENT_ID, STUDENT_ID_2],
+          tutorId: USER_ID,
+          excludeClassId: CLASS_ID,
+        }),
+      ).resolves.toEqual([STUDENT_ID]);
+      expect(prisma.classStudent.findMany).toHaveBeenCalledWith({
+        where: {
+          studentId: { in: [STUDENT_ID, STUDENT_ID_2] },
+          classId: { not: CLASS_ID },
+          class: { tutorId: { not: USER_ID } },
+        },
+        select: { studentId: true },
+        distinct: ['studentId'],
+      });
+    });
+  });
+
+  describe('getRosterStudentIds', () => {
+    it('returns only the enrolled student ids of the class', async () => {
+      prisma.classStudent.findMany.mockResolvedValue([
+        { studentId: STUDENT_ID },
+        { studentId: STUDENT_ID_2 },
+      ]);
+
+      await expect(repo.getRosterStudentIds({ classId: CLASS_ID })).resolves.toEqual([
+        STUDENT_ID,
+        STUDENT_ID_2,
+      ]);
+      expect(prisma.classStudent.findMany).toHaveBeenCalledWith({
+        where: { classId: CLASS_ID },
+        select: { studentId: true },
       });
     });
   });

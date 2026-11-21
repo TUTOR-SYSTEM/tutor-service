@@ -14,14 +14,16 @@ export const createClassSchema = z.object({
     .min(1, 'Subject is required')
     .max(255, 'Subject too long'),
   tuition: z.coerce.number().min(0).default(0).optional(),
-  description: z.string().optional(),
+  description: z.string().nullable().optional(),
   status: classStatusEnum.default('OPEN').optional(),
   format: sessionFormatEnum.default('OFFLINE').optional(),
   startTime: z.coerce.date({ message: 'Start time must be a valid date' }),
   endTime: z.coerce.date({ message: 'End time must be a valid date' }),
-  location: z.string().optional(),
+  location: z.string().nullable().optional(),
   curriculumId: z.string().uuid('Invalid curriculum ID').optional().nullable(),
   tutorId: z.string({ message: 'Tutor ID is required' }).uuid('Invalid tutor ID'),
+  /** 1 = lớp 1 kèm 1, 10 = lớp nhóm. Bỏ trống = 10. */
+  maxStudents: z.coerce.number().int().min(1).max(10).optional(),
   schedulesId: z
     .array(
       z
@@ -35,9 +37,10 @@ export const createClassSchema = z.object({
 // `.partial()` keeps the `.default(...)` of wrapped fields, so an update that omits `tuition`,
 // `status`, `format` or `schedulesId` would overwrite them with the defaults. Redeclare them
 // without a default so "absent" really means "unchanged".
+// `tutorId` stays optional: only ADMIN may reassign a class (enforced in the service).
+// `null` clears a nullable field (description / location / curriculumId); `undefined` = unchanged.
 export const updateClassSchema = createClassSchema
   .partial()
-  .omit({ tutorId: true })
   .extend({
     tuition: z.coerce.number().min(0).optional(),
     status: classStatusEnum.optional(),
@@ -60,4 +63,6 @@ export const getClassesQuerySchema = z.object({
   status: classStatusEnum.optional(),
   subject: z.string().optional(),
   studentsId: z.string().uuid('Invalid student ID').optional(),
+  // ADMIN lọc lớp theo gia sư quản lý.
+  tutorId: z.string().uuid('Invalid tutor ID').optional(),
 });
