@@ -269,6 +269,14 @@ export class ClassRepository {
   // enroll one or many students into a class; duplicates (already enrolled) are skipped
   // via the (class_id, student_id) unique index and simply not returned.
   /** Thêm học sinh vào lớp và gán gia sư lớp cho họ, trong cùng một transaction. */
+  /** Removes one student from a class; returns how many enrollment rows were deleted (0 or 1). */
+  async removeStudent({ classId, studentId }: { classId: string; studentId: string }) {
+    const { count } = await this.prisma.classStudent.deleteMany({
+      where: { classId, studentId },
+    });
+    return count;
+  }
+
   async addStudents({
     classId,
     studentIds,
