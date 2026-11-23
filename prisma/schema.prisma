@@ -348,7 +348,7 @@ model Curriculum {
   userId      String   @map("userId") @db.Uuid
   gradesId    String?  @map("grade_id") @db.Uuid
   subject     String   @map("title") @db.VarChar(255)
-  code        String   @db.VarChar(6)
+  code        String   @db.VarChar(10)
   grade       String   @db.VarChar(2)
   courseTime  String   @map("courseTime") @db.VarChar
   description String?

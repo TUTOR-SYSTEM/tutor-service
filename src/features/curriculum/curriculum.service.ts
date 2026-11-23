@@ -14,7 +14,12 @@ import {
   type CreateCurriculumDto,
   type UpdateCurriculumDto,
 } from '@packages/entities';
-import { canActOnOwned, checkUuidValid, generateCode } from '@packages/helpers';
+import {
+  canActOnOwned,
+  checkUuidValid,
+  generateCode,
+  generateSubjectCode,
+} from '@packages/helpers';
 
 @Injectable()
 export class CurriculumService {
@@ -24,17 +29,23 @@ export class CurriculumService {
     private readonly userService: UserService,
   ) {}
 
-  async generateNewCodeService(): Promise<string | null> {
+  /**
+   * Returns a curriculum code that does not exist in the DB yet. With `subject`, the code is
+   * `PREFIX-NNN` (prefix from the subject's English name, e.g. `MAT-463`); without it, a random
+   * 6-char code (legacy behaviour).
+   */
+  async generateNewCodeService(subject?: string | null): Promise<string | null> {
     const MAX_RETRIES = 5;
     let attempts = 0;
-    let newCode = generateCode();
+    const nextCode = () => (subject ? generateSubjectCode(subject) : generateCode());
+    let newCode = nextCode();
 
     while (await this.curriculumRepository.findByCode(newCode)) {
       attempts++;
       if (attempts >= MAX_RETRIES) {
         throw new ConflictException(ERROR_MESSAGES.UNABLE_TO_GENERATE_UNIQUE_CODE);
       }
-      newCode = generateCode();
+      newCode = nextCode();
     }
 
     return newCode;

@@ -9,11 +9,8 @@ export const createCurriculumSchema = z.object({
     .max(255, 'Title too long'),
   code: z
     .string({ message: 'Code curriculum must be string ...' })
-    .min(1, {
-      message: 'Code curriculum must me 6 character ...',
-    })
-    .max(6, {
-      message: 'Code curriculum must me 6 character ...',
+    .regex(/^(?:[A-Z]{3}-\d{3}|[A-Z0-9]{6})$/, {
+      message: 'Curriculum code must be like MAT-463 (3 letters, 3 digits) or 6 characters',
     }),
   grade: z.union([z.string(), z.number()]).transform((value) => Number(value)),
   courseTime: z.string({ message: 'Course time must be string ...' }),

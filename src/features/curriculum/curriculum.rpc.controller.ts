@@ -18,8 +18,8 @@ export class CurriculumRpcController {
 
   @MessagePattern('curriculum.generateCode')
   // replies with the bare code string (CONTRACT C4) — the UI reads it as a string
-  generateCode() {
-    return this.curriculumService.generateNewCodeService();
+  generateCode(@Payload() payload?: { subject?: string }) {
+    return this.curriculumService.generateNewCodeService(payload?.subject);
   }
 
   @MessagePattern('curriculum.create')

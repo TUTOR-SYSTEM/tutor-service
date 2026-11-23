@@ -46,8 +46,9 @@ export class CurriculumController {
   })
   @SwaggerResponse({ status: StatusCodes.CREATED, description: 'Create curriculum code ...' })
   @ApiResponse({ statusCode: StatusCodes.CREATED, message: 'Create curriculum code ...' })
-  async getNewCurrriculumCodeController() {
-    return await this.curriculumService.generateNewCodeService();
+  @ApiQuery({ name: 'subject', required: false, description: 'Subject name (VN), e.g. Toán → MAT-463' })
+  async getNewCurrriculumCodeController(@Query('subject') subject?: string) {
+    return await this.curriculumService.generateNewCodeService(subject);
   }
   @Post('create')
   @HttpCode(StatusCodes.CREATED)
