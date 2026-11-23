@@ -422,6 +422,35 @@ export class ClassService {
     };
   }
 
+  async removeStudentService({
+    userId,
+    role,
+    classId,
+    studentId,
+  }: {
+    userId: string;
+    role?: string | null;
+    classId: string;
+    studentId: string;
+  }) {
+    if (!userId || !checkUuidValid({ data: userId }))
+      throw new BadRequestException(ERROR_MESSAGES.USER_ID_MUST_BE_UUID);
+    if (!classId || !checkUuidValid({ data: classId }))
+      throw new BadRequestException(ERROR_MESSAGES.CLASS_ID_MUST_BE_UUID);
+    if (!studentId || !checkUuidValid({ data: studentId }))
+      throw new BadRequestException(ERROR_MESSAGES.STUDENT_NOT_FOUND);
+
+    // same ownership rule as addStudents: only the class's tutor (or ADMIN) may change its roster
+    const classData = await this.repo.getClassByField({ field: 'id', value: classId });
+    if (!classData || !canActOnOwned({ userId, role }, classData.tutorId))
+      throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
+
+    const removed = await this.repo.removeStudent({ classId, studentId });
+    if (removed === 0) throw new NotFoundException(ERROR_MESSAGES.STUDENT_NOT_IN_CLASS);
+
+    return { classId, studentId, removed: true };
+  }
+
   async delClassService({
     userId,
     role,

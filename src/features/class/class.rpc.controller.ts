@@ -50,6 +50,13 @@ export class ClassRpcController {
     return this.classService.addStudentsService(payload);
   }
 
+  @MessagePattern('class.removeStudent')
+  removeStudent(
+    @Payload() payload: { userId: string; role?: string; classId: string; studentId: string },
+  ) {
+    return this.classService.removeStudentService(payload);
+  }
+
   @MessagePattern('class.getStudents')
   getStudents(@Payload() payload: { userId: string; role?: string; id: string }) {
     return this.classService.getAllStudentsService(payload);
