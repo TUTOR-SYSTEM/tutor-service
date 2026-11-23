@@ -1,3 +1,4 @@
+import { ERROR_MESSAGES } from 'src/data/constants';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ConversationService } from 'src/features/chat/conversation.service';
 import { createPrismaMock, PrismaMock } from '../../support/prisma.mock';
@@ -294,7 +295,7 @@ describe('ConversationService', () => {
     });
 
     it('treats a user with a null role as STUDENT when checking permissions', async () => {
-      users(null as never, 'TUTOR');
+      users(null, 'TUTOR');
       prisma.user.findUnique.mockImplementation(({ where }: { where: { id: string } }) =>
         Promise.resolve(
           where.id === USER_ID ? { id: USER_ID, role: null } : { id: OTHER_ID, role: 'TUTOR' },
@@ -427,6 +428,11 @@ describe('ConversationService', () => {
   describe('createGroupConversation', () => {
     beforeEach(() => {
       prisma.conversation.create.mockResolvedValue({ id: CONV_ID });
+      prisma.user.findMany.mockResolvedValue([
+        { id: USER_ID, role: 'ADMIN' },
+        { id: OTHER_ID, role: 'STUDENT' },
+        { id: THIRD_ID, role: 'STUDENT' },
+      ]);
       jest.spyOn(service, 'getConversationById').mockResolvedValue({ id: CONV_ID } as never);
     });
 
@@ -452,21 +458,24 @@ describe('ConversationService', () => {
     });
 
     it('rejects a member the creator is not allowed to chat with (no insert)', async () => {
-      queue('select', users, [user(CURRENT, 'PARENT'), user('a', 'STUDENT')]);
+      prisma.user.findMany.mockResolvedValue([
+        { id: USER_ID, role: 'PARENT' },
+        { id: 'a', role: 'STUDENT' },
+      ]);
 
-      await expect(service.createGroupConversation(CURRENT, 'Study group', ['a'])).rejects.toThrow(
+      await expect(service.createGroupConversation(USER_ID, 'Study group', ['a'])).rejects.toThrow(
         ForbiddenException,
       );
-      expect(db.insert).not.toHaveBeenCalled();
+      expect(prisma.conversationParticipant.createMany).not.toHaveBeenCalled();
     });
 
     it('rejects an unknown member id (no insert)', async () => {
-      queue('select', users, [user(CURRENT, 'ADMIN')]);
+      prisma.user.findMany.mockResolvedValue([{ id: USER_ID, role: 'ADMIN' }]);
 
       await expect(
-        service.createGroupConversation(CURRENT, 'Study group', ['ghost']),
+        service.createGroupConversation(USER_ID, 'Study group', ['ghost']),
       ).rejects.toThrow(NotFoundException);
-      expect(db.insert).not.toHaveBeenCalled();
+      expect(prisma.conversationParticipant.createMany).not.toHaveBeenCalled();
     });
   });
 
@@ -516,6 +525,15 @@ describe('ConversationService', () => {
   });
 
   describe('addParticipant', () => {
+    beforeEach(() => {
+      prisma.conversation.findUnique.mockResolvedValue({ id: CONV_ID, type: 'GROUP' });
+      prisma.user.findMany.mockResolvedValue([
+        { id: USER_ID, role: 'ADMIN' },
+        { id: OTHER_ID, role: 'STUDENT' },
+        { id: THIRD_ID, role: 'STUDENT' },
+      ]);
+    });
+
     it('rejects a caller who is not in the conversation', async () => {
       prisma.conversationParticipant.findUnique.mockResolvedValue(null);
 
@@ -547,24 +565,25 @@ describe('ConversationService', () => {
     });
 
     it('refuses to add members to a direct conversation', async () => {
-      queue('select', conversationParticipants, [{ userId: CURRENT }]);
-      queue('select', conversations, [{ type: 'DIRECT' }]);
+      prisma.conversationParticipant.findUnique.mockResolvedValue({ id: 'caller' });
+      prisma.conversation.findUnique.mockResolvedValue({ id: CONV_ID, type: 'DIRECT' });
 
-      await expect(service.addParticipant(CONV_ID, CURRENT, TARGET)).rejects.toThrow(
+      await expect(service.addParticipant(CONV_ID, USER_ID, THIRD_ID)).rejects.toThrow(
         new ForbiddenException(ERROR_MESSAGES.CHAT_DIRECT_NO_ADD_PARTICIPANT),
       );
-      expect(db.insert).not.toHaveBeenCalled();
+      expect(prisma.conversationParticipant.create).not.toHaveBeenCalled();
     });
 
     it('refuses to add a user the caller may not chat with (no insert)', async () => {
-      queue('select', conversationParticipants, [{ userId: CURRENT }], []);
-      queue('select', conversations, [{ type: 'GROUP' }]);
-      queue('select', users, [user(CURRENT, 'PARENT'), user(TARGET, 'STUDENT')]);
+      prisma.user.findMany.mockResolvedValue([
+        { id: USER_ID, role: 'PARENT' },
+        { id: THIRD_ID, role: 'STUDENT' },
+      ]);
 
-      await expect(service.addParticipant(CONV_ID, CURRENT, TARGET)).rejects.toThrow(
+      await expect(service.addParticipant(CONV_ID, USER_ID, THIRD_ID)).rejects.toThrow(
         ForbiddenException,
       );
-      expect(db.insert).not.toHaveBeenCalled();
+      expect(prisma.conversationParticipant.create).not.toHaveBeenCalled();
     });
   });
 

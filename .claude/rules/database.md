@@ -32,6 +32,9 @@
   check `count > 0`. Constraint failures surface as `P2002` (unique) / `P2003` (FK) /
   `P2023` (malformed uuid) and are mapped to 409/400 by `RpcExceptionFilter` and
   `ErrorInterceptor` — check `P2002` (not just `23505`) when a service handles a duplicate itself.
+- **Exercise uniqueness**: `exercises` has `unique (session_id, student_id)` (NULL `session_id` rows are
+  not constrained). Bulk inserts that can race (e.g. assigning homework on session completion) use
+  `createMany({ skipDuplicates: true })`.
 - **Decimals**: `numeric` columns are `Decimal` in Prisma, not strings. Pass strings or numbers
   in; convert on the way out (`Number(row.score)`, `amount.toFixed(2)`) — see `ExerciseRepository`
   and `TuitionRepository`.

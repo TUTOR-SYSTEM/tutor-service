@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService, uuidList } from '../../database/prisma.service';
+import { ERROR_MESSAGES } from 'src/data/constants';
 
 type UserRole = 'STUDENT' | 'ADMIN' | 'TUTOR' | 'PARENT';
 
@@ -241,6 +242,16 @@ export class ConversationService {
 
   async addParticipant(conversationId: string, userId: string, newUserId: string) {
     await this.assertParticipant(conversationId, userId);
+
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: { type: true },
+    });
+    if (conversation?.type === 'DIRECT') {
+      throw new ForbiddenException(ERROR_MESSAGES.CHAT_DIRECT_NO_ADD_PARTICIPANT);
+    }
+    // the new member must be someone the caller may chat with (same policy as DM / group create)
+    await this.assertCanChatWithAll(userId, [newUserId]);
 
     const existing = await this.prisma.conversationParticipant.findUnique({
       where: { conversationId_userId: { conversationId, userId: newUserId } },

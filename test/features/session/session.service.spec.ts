@@ -6,6 +6,7 @@ import { SessionRepository } from 'src/features/session/session.repository';
 import { ClassService } from 'src/features/class/class.service';
 import { LessonService } from 'src/features/lesson/lesson.service';
 import { UserService } from 'src/features/user/user.service';
+import { NotificationNotifier } from 'src/features/notification/notification.notifier';
 
 // lesson.repository pulls an ESM-only transitive dep (uuid) that jest cannot parse; the spec
 // only needs the LessonService token, so replace the module with a bare class
@@ -20,7 +21,8 @@ const LESSON_ID = '55555555-5555-4555-8555-555555555555';
 describe('SessionService', () => {
   let service: SessionService;
   let repo: Record<string, jest.Mock>;
-  let classService: { getOwnedClassService: jest.Mock };
+  let classService: { getOwnedClassService: jest.Mock; getRosterStudentIdsService: jest.Mock };
+  let notifier: { notifyUsers: jest.Mock };
   let lessonService: { getLessonByIdService: jest.Mock };
   let userService: { getUserRoleById: jest.Mock };
 
@@ -37,11 +39,15 @@ describe('SessionService', () => {
       update: jest.fn(),
       del: jest.fn(),
       findTakenSessionNumbers: jest.fn().mockResolvedValue([]),
+      findExerciseStudentIds: jest.fn().mockResolvedValue([]),
+      createAssignedExercises: jest.fn().mockResolvedValue(undefined),
     };
     // the class row carries its tutor: that is the default session tutor
     classService = {
       getOwnedClassService: jest.fn().mockResolvedValue({ id: CLASS_ID, tutorId: USER_ID }),
+      getRosterStudentIdsService: jest.fn().mockResolvedValue([]),
     };
+    notifier = { notifyUsers: jest.fn().mockResolvedValue(undefined) };
     lessonService = { getLessonByIdService: jest.fn().mockResolvedValue({ id: LESSON_ID }) };
     userService = {
       getUserRoleById: jest.fn().mockResolvedValue({ id: OTHER_USER_ID, role: 'TUTOR' }),
@@ -54,6 +60,10 @@ describe('SessionService', () => {
         { provide: ClassService, useValue: classService },
         { provide: LessonService, useValue: lessonService },
         { provide: UserService, useValue: userService },
+        {
+          provide: NotificationNotifier,
+          useValue: notifier,
+        },
       ],
     }).compile();
 
@@ -359,6 +369,86 @@ describe('SessionService', () => {
       await expect(service.delSessionService({ userId: USER_ID, id: SESSION_ID })).rejects.toThrow(
         new NotFoundException(ERROR_MESSAGES.SESSION_NOT_FOUND),
       );
+    });
+  });
+
+  describe('completing a session assigns its homework to the class', () => {
+    const STUDENT_A = '66666666-6666-4666-8666-666666666666';
+    const STUDENT_B = '77777777-7777-4777-8777-777777777777';
+    const withHomework = {
+      id: SESSION_ID,
+      classId: CLASS_ID,
+      tutorId: USER_ID,
+      title: 'Động học',
+      sessionNumber: 3,
+      exerciseUrls: [{ name: 'bt.pdf', url: 'u', key: 'k' }],
+      exerciseDueAt: null,
+      status: 'COMPLETED',
+    };
+
+    it('creates ASSIGNED rows for roster students without a row yet and notifies them', async () => {
+      repo.getById.mockResolvedValue({
+        id: SESSION_ID,
+        classId: CLASS_ID,
+        tutorId: USER_ID,
+        sessionNumber: 3,
+        title: 'Động học',
+        status: 'ONGOING',
+        exerciseUrls: withHomework.exerciseUrls,
+        exerciseDueAt: null,
+      });
+      repo.update.mockResolvedValue(withHomework);
+      classService.getRosterStudentIdsService.mockResolvedValue([STUDENT_A, STUDENT_B]);
+      repo.findExerciseStudentIds.mockResolvedValue([STUDENT_A]);
+
+      await service.updateSessionService({
+        userId: USER_ID,
+        id: SESSION_ID,
+        data: { status: 'COMPLETED' } as never,
+      });
+
+      expect(repo.createAssignedExercises).toHaveBeenCalledWith({
+        sessionId: SESSION_ID,
+        tutorId: USER_ID,
+        studentIds: [STUDENT_B],
+      });
+      expect(notifier.notifyUsers).toHaveBeenCalledTimes(1);
+      expect(notifier.notifyUsers).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'STUDENT', recipients: [STUDENT_B] }),
+      );
+    });
+
+    it('does nothing when the session was already COMPLETED', async () => {
+      repo.getById.mockResolvedValue({ id: SESSION_ID, classId: CLASS_ID, status: 'COMPLETED' });
+      repo.update.mockResolvedValue(withHomework);
+
+      await service.updateSessionService({
+        userId: USER_ID,
+        id: SESSION_ID,
+        data: { status: 'COMPLETED' } as never,
+      });
+
+      expect(repo.createAssignedExercises).not.toHaveBeenCalled();
+      expect(notifier.notifyUsers).not.toHaveBeenCalled();
+    });
+
+    it('does nothing when the session has no homework files', async () => {
+      repo.getById.mockResolvedValue({
+        id: SESSION_ID,
+        classId: CLASS_ID,
+        tutorId: USER_ID,
+        status: 'ONGOING',
+        exerciseUrls: [],
+      });
+      repo.update.mockResolvedValue({ ...withHomework, exerciseUrls: [] });
+
+      await service.updateSessionService({
+        userId: USER_ID,
+        id: SESSION_ID,
+        data: { status: 'COMPLETED' } as never,
+      });
+
+      expect(repo.createAssignedExercises).not.toHaveBeenCalled();
     });
   });
 

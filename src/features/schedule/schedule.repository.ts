@@ -48,7 +48,6 @@ export class ScheduleRepository {
   // list every schedule across the classes the user owns (tutor) or is enrolled in (student)
   async getAll({
     userId,
-    role,
     query,
   }: {
     userId: string;

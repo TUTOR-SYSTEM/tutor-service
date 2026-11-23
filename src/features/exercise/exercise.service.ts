@@ -10,6 +10,7 @@ import { ERROR_MESSAGES } from 'src/data/constants';
 import type {
   CreateExerciseDto,
   GradeExerciseDto,
+  RequestResubmitExerciseDto,
   SubmitExerciseDto,
   getExerciseDto,
 } from '@packages/entities/exercise';
@@ -19,6 +20,7 @@ import { UserService } from '../user/user.service';
 import { SessionService } from '../session/session.service';
 import { LessonService } from '../lesson/lesson.service';
 import { ClassService } from '../class/class.service';
+import { NotificationNotifier } from '../notification/notification.notifier';
 
 @Injectable()
 export class ExerciseService {
@@ -29,6 +31,7 @@ export class ExerciseService {
     private readonly sessionService: SessionService,
     private readonly lessonService: LessonService,
     private readonly classService: ClassService,
+    private readonly notifier: NotificationNotifier,
   ) {}
 
   private assertUuid(value: string | null | undefined, label: string) {
@@ -71,6 +74,93 @@ export class ExerciseService {
       this.assertUuid(lessonId, 'lessonId');
       const lesson = await this.lessonService.getLessonByIdService({ id: lessonId });
       if (!lesson) throw new NotFoundException(ERROR_MESSAGES.LESSON_NOT_FOUND);
+    }
+  }
+
+  /** Đường dẫn trang nộp/xem bài của học sinh cho một buổi. */
+  private async studentExercisePath(
+    userId: string,
+    role: string | null | undefined,
+    sessionId: string,
+  ) {
+    const info = await this.sessionInfo({ userId, role, sessionId });
+    return info.classId ? `/classes/${info.classId}/sessions/${sessionId}/exercise` : '/grades';
+  }
+
+  /** Nhãn "Buổi X" và lớp của buổi (để dựng đường dẫn chi tiết). Không bao giờ throw. */
+  private async sessionInfo({
+    userId,
+    role,
+    sessionId,
+  }: {
+    userId: string;
+    role?: string | null;
+    sessionId?: string | null;
+  }): Promise<{ label: string; classId: string | null }> {
+    if (!sessionId) return { label: '', classId: null };
+    try {
+      const session = (await this.sessionService.getSessionService({
+        userId,
+        role,
+        id: sessionId,
+      })) as { sessionNumber?: number | null; classId?: string | null } | null;
+      const n = session?.sessionNumber;
+      return {
+        label: n !== undefined && n !== null ? `Buổi ${n}` : '',
+        classId: session?.classId ?? null,
+      };
+    } catch {
+      return { label: '', classId: null };
+    }
+  }
+
+  /** Tên hiển thị của học sinh; fallback 'Một học sinh'. Không bao giờ throw. */
+  private async studentLabel(studentId: string): Promise<string> {
+    try {
+      const [row] = (await this.userService.getUserByField({ field: 'id', value: studentId })) as {
+        firstName?: string | null;
+        lastName?: string | null;
+      }[];
+      const name = [row?.lastName, row?.firstName].filter(Boolean).join(' ').trim();
+      return name || 'Một học sinh';
+    } catch {
+      return 'Một học sinh';
+    }
+  }
+
+  /**
+   * Báo gia sư khi chính học sinh nộp bài (không gửi khi ADMIN/TUTOR ghi hộ). Lỗi chỉ warn.
+   * Payload type TUTOR, không classId/studentId — notification-service kiểm gia sư dạy học sinh.
+   */
+  private async notifyTutorOfSubmission({
+    userId,
+    role,
+    exercise,
+  }: {
+    userId: string;
+    role?: string | null;
+    exercise: { id: string; studentId: string; tutorId: string; sessionId: string | null };
+  }) {
+    try {
+      if (userId !== exercise.studentId || isAdminRole(role) || role === 'TUTOR') return;
+      const [name, session] = await Promise.all([
+        this.studentLabel(exercise.studentId),
+        this.sessionInfo({ userId, role, sessionId: exercise.sessionId }),
+      ]);
+      await this.notifier.notifyUsers({
+        role: 'STUDENT',
+        senderId: userId,
+        recipients: [exercise.tutorId],
+        type: 'TUTOR',
+        title: 'Học sinh đã nộp bài tập',
+        content: `${name} đã nộp bài tập${session.label ? ` (${session.label})` : ''}.`,
+        redirectUrl:
+          session.classId && exercise.sessionId
+            ? `/classes/${session.classId}/sessions/${exercise.sessionId}/submissions/${exercise.id}`
+            : '/grades',
+      });
+    } catch (error) {
+      this.logger.warn(`Không gửi được thông báo nộp bài: ${(error as Error).message}`);
     }
   }
 
@@ -124,11 +214,29 @@ export class ExerciseService {
         sessionId: data.sessionId,
       });
       if (existing) {
+        // bài đã được giao (ASSIGNED, chưa nộp): học sinh nộp vào chính dòng đó
+        if (existing.status === 'ASSIGNED') {
+          const submitted = await this.repo.update({
+            id: existing.id,
+            data: {
+              exerciseUrls: data.exerciseUrls ?? [],
+              status: 'SUBMITTED',
+            },
+            notStatus: 'GRADED',
+          });
+          if (!submitted) throw new BadRequestException(ERROR_MESSAGES.EXERCISE_ALREADY_GRADED);
+          await this.notifyTutorOfSubmission({ userId, role, exercise: submitted });
+          return submitted;
+        }
+        if (existing.status === 'RESUBMIT') {
+          throw new ConflictException(ERROR_MESSAGES.EXERCISE_RESUBMIT_REQUIRED);
+        }
         throw new ConflictException(ERROR_MESSAGES.EXERCISE_ALREADY_SUBMITTED);
       }
     }
 
     const created = await this.repo.create({ data: { ...data, status: 'SUBMITTED' } });
+    await this.notifyTutorOfSubmission({ userId, role, exercise: created });
     return created;
   }
 
@@ -200,6 +308,58 @@ export class ExerciseService {
       notStatus: 'GRADED',
     });
     if (!updated) throw new BadRequestException(ERROR_MESSAGES.EXERCISE_ALREADY_GRADED);
+    await this.notifyTutorOfSubmission({ userId, role, exercise: updated });
+    return updated;
+  }
+
+  // tutor asks the student to submit again (status -> RESUBMIT, files are kept)
+  async requestResubmitService({
+    userId,
+    role,
+    id,
+    data,
+  }: {
+    userId: string;
+    role?: string | null;
+    id: string;
+    data: RequestResubmitExerciseDto;
+  }) {
+    this.assertUuid(userId, 'User Id');
+    this.assertUuid(id, 'Exercise Id');
+
+    const found = await this.repo.findById({ id });
+    if (!found) throw new NotFoundException(ERROR_MESSAGES.EXERCISE_NOT_FOUND);
+    if (!canActOnOwned({ userId, role }, found.tutorId)) {
+      throw new ForbiddenException(ERROR_MESSAGES.EXERCISE_GRADE_NOT_ALLOWED);
+    }
+    if (found.status === 'ASSIGNED') {
+      throw new BadRequestException(ERROR_MESSAGES.EXERCISE_NOT_SUBMITTED);
+    }
+
+    const comment = data?.comment ?? null;
+    const updated = await this.repo.update({
+      id,
+      data: { status: 'RESUBMIT', ...(comment ? { comment } : {}) },
+    });
+    if (!updated) throw new NotFoundException(ERROR_MESSAGES.EXERCISE_NOT_FOUND);
+
+    try {
+      const session = await this.sessionInfo({ userId, role, sessionId: found.sessionId });
+      await this.notifier.notifyUsers({
+        role: role ?? 'TUTOR',
+        senderId: userId,
+        recipients: [found.studentId],
+        type: 'STUDENT',
+        title: 'Yêu cầu nộp lại bài tập',
+        content: `Gia sư yêu cầu bạn nộp lại bài tập${session.label ? ` (${session.label})` : ''}.${comment ? ` Nhận xét: ${comment}` : ''}`,
+        redirectUrl:
+          session.classId && found.sessionId
+            ? `/classes/${session.classId}/sessions/${found.sessionId}/exercise`
+            : '/grades',
+      });
+    } catch (error) {
+      this.logger.warn(`Không gửi được thông báo nộp lại: ${(error as Error).message}`);
+    }
     return updated;
   }
 
@@ -223,6 +383,9 @@ export class ExerciseService {
     if (!canActOnOwned({ userId, role }, found.tutorId)) {
       throw new ForbiddenException(ERROR_MESSAGES.EXERCISE_GRADE_NOT_ALLOWED);
     }
+    if (found.status === 'ASSIGNED') {
+      throw new BadRequestException(ERROR_MESSAGES.EXERCISE_NOT_SUBMITTED);
+    }
 
     // intentional: the assigned tutor may re-grade an already GRADED exercise to correct a score
     const graded = await this.repo.update({
@@ -235,6 +398,20 @@ export class ExerciseService {
         ...(data.answerKeyUrls !== undefined ? { answerKeyUrls: data.answerKeyUrls } : {}),
       },
     });
+    if (graded) {
+      const score = Number(data.score);
+      await this.notifier.notifyUsers({
+        role,
+        senderId: userId,
+        recipients: [found.studentId],
+        type: 'STUDENT',
+        title: 'Bài tập đã được chấm',
+        content: `Bài tập của bạn đã được chấm: ${Number.isFinite(score) ? score : data.score}/10.`,
+        redirectUrl: found.sessionId
+          ? await this.studentExercisePath(userId, role, found.sessionId)
+          : '/grades',
+      });
+    }
     return graded;
   }
 

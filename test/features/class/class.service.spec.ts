@@ -9,6 +9,7 @@ import { ERROR_MESSAGES } from 'src/data/constants';
 import { ClassService } from 'src/features/class/class.service';
 import { ClassRepository } from 'src/features/class/class.repository';
 import { UserService } from 'src/features/user/user.service';
+import { NotificationNotifier } from 'src/features/notification/notification.notifier';
 
 // class.repository pulls an ESM-only transitive dep (uuid) that jest cannot parse;
 // the service only needs the repository token, so swap the module for a bare class
@@ -27,6 +28,7 @@ const createDto = { name: 'Math 9', code: 'M9', tutorId: TUTOR_ID } as never;
 describe('ClassService', () => {
   let service: ClassService;
   let repo: Record<string, jest.Mock>;
+  let notifier: { notifyUsers: jest.Mock };
   let user: { userExists: jest.Mock; getUserRoleById: jest.Mock; getUserRolesByIds: jest.Mock };
 
   beforeEach(async () => {
@@ -48,7 +50,9 @@ describe('ClassService', () => {
       getMaterials: jest.fn(),
       getSchedulesByClass: jest.fn().mockResolvedValue([]),
       getRecentSessionByClass: jest.fn().mockResolvedValue(null),
+      getPublicTutor: jest.fn().mockResolvedValue(null),
     };
+    notifier = { notifyUsers: jest.fn().mockResolvedValue(undefined) };
     user = {
       userExists: jest.fn().mockResolvedValue(true),
       getUserRoleById: jest.fn().mockResolvedValue({ id: TUTOR_ID, role: 'TUTOR' }),
@@ -63,6 +67,7 @@ describe('ClassService', () => {
         ClassService,
         { provide: ClassRepository, useValue: repo },
         { provide: UserService, useValue: user },
+        { provide: NotificationNotifier, useValue: notifier },
       ],
     }).compile();
 
@@ -408,10 +413,12 @@ describe('ClassService', () => {
       });
     });
 
-    it('refuses a roster containing a student enrolled in another tutor\'s class (nothing written)', async () => {
+    it("refuses a roster containing a student enrolled in another tutor's class (nothing written)", async () => {
       repo.getClassByField.mockResolvedValue(existing);
       repo.findStudentIdsWithOtherTutor.mockResolvedValue([STUDENT_B]);
-      user.getUserRolesByIds.mockResolvedValue([{ id: STUDENT_A, role: 'STUDENT', tutorId: TUTOR_ID }]);
+      user.getUserRolesByIds.mockResolvedValue([
+        { id: STUDENT_A, role: 'STUDENT', tutorId: TUTOR_ID },
+      ]);
 
       await expect(
         service.updateClassService({
@@ -512,7 +519,9 @@ describe('ClassService', () => {
       repo.getClassByField.mockResolvedValue(existing);
       repo.getRosterStudentIds.mockResolvedValue([STUDENT_A]);
       repo.updateWithRoster.mockResolvedValue({ ...existing });
-      user.getUserRolesByIds.mockResolvedValue([{ id: STUDENT_B, role: 'STUDENT', tutorId: TUTOR_ID }]);
+      user.getUserRolesByIds.mockResolvedValue([
+        { id: STUDENT_B, role: 'STUDENT', tutorId: TUTOR_ID },
+      ]);
 
       await service.updateClassService({
         userId: TUTOR_ID,
@@ -578,7 +587,11 @@ describe('ClassService', () => {
       repo.updateWithRoster.mockResolvedValue({ ...existing });
 
       await expect(
-        service.updateClassService({ userId: TUTOR_ID, id: CLASS_ID, data: { subject: 'Math' } as never }),
+        service.updateClassService({
+          userId: TUTOR_ID,
+          id: CLASS_ID,
+          data: { subject: 'Math' } as never,
+        }),
       ).resolves.toBeDefined();
     });
 
@@ -902,6 +915,23 @@ describe('ClassService', () => {
       });
     });
 
+    it('notifies only the newly added students, with the class name and link', async () => {
+      repo.getClassByField.mockResolvedValue({ id: CLASS_ID, tutorId: TUTOR_ID, name: 'Toán 9' });
+      repo.addStudents.mockResolvedValue([{ studentId: STUDENT_A }]);
+
+      await service.addStudentsService(input([STUDENT_A, STUDENT_B]));
+
+      expect(notifier.notifyUsers).toHaveBeenCalledWith(
+        expect.objectContaining({
+          senderId: TUTOR_ID,
+          recipients: [STUDENT_A],
+          type: 'STUDENT',
+          title: 'Bạn đã được thêm vào lớp Toán 9',
+          redirectUrl: `/classes/${CLASS_ID}`,
+        }),
+      );
+    });
+
     it('dedupes the requested ids before validating and inserting them', async () => {
       repo.getClassByField.mockResolvedValue({ id: CLASS_ID, tutorId: TUTOR_ID });
       repo.addStudents.mockResolvedValue([{ studentId: STUDENT_A }, { studentId: STUDENT_B }]);
@@ -936,7 +966,7 @@ describe('ClassService', () => {
       });
     });
 
-    it('refuses students enrolled in another tutor\'s class (nothing inserted)', async () => {
+    it("refuses students enrolled in another tutor's class (nothing inserted)", async () => {
       repo.getClassByField.mockResolvedValue({ id: CLASS_ID, tutorId: TUTOR_ID, maxStudents: 10 });
       repo.findStudentIdsWithOtherTutor.mockResolvedValue([STUDENT_B]);
 
@@ -1146,6 +1176,7 @@ describe('ClassService', () => {
         service.getClassWatchService({ userId: STUDENT_A, id: CLASS_ID }),
       ).resolves.toEqual({
         class: cls,
+        tutor: null,
         recentSession: null,
         schedules: [{ id: 'sch-1' }],
         students: [{ id: STUDENT_A, parent: null }],

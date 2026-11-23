@@ -116,7 +116,10 @@ export class ClassRepository {
           const roster = studentIds
             ? studentIds
             : (
-                await tx.classStudent.findMany({ where: { classId: id }, select: { studentId: true } })
+                await tx.classStudent.findMany({
+                  where: { classId: id },
+                  select: { studentId: true },
+                })
               ).map((row) => row.studentId);
           await this.syncStudentsTutor(tx, roster, updated.tutorId);
         }
@@ -167,7 +170,16 @@ export class ClassRepository {
     });
   }
 
+  /** Thông tin công khai của gia sư (không lộ email/SĐT) — học sinh/phụ huynh xem được. */
+  async getPublicTutor({ tutorId }: { tutorId: string }) {
+    return this.prisma.user.findUnique({
+      where: { id: tutorId },
+      select: { id: true, firstName: true, lastName: true, avatar: true },
+    });
+  }
+
   /** Id học sinh đang thuộc lớp (không kèm thông tin cá nhân). */
+
   async getRosterStudentIds({ classId }: { classId: string }) {
     const rows = await this.prisma.classStudent.findMany({
       where: { classId },

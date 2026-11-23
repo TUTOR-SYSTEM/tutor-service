@@ -17,7 +17,7 @@ Ask the user (or infer from the request) before generating:
 1. **Feature name** — singular, lowercase (e.g. `session`). Controller route is the plural (`sessions`).
 2. **Fields** — name, type, required/optional, validation (min/max/uuid/enum/url/regex).
 3. Whether it needs a **Prisma model** in `prisma/schema.prisma` (usually yes for a new domain).
-4. Which **sibling services** it depends on (`UserService`, `NotificationService`, …) so their
+4. Which **sibling services** it depends on (`UserService`, `NotificationNotifier`, …) so their
    modules get imported.
 
 If fields are unclear, propose a sensible set and confirm before writing files.

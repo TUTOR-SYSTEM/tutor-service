@@ -13,13 +13,17 @@ tutor-service/
 │   │   ├── database.module.ts     # Global module exporting PrismaService (PrismaClient)
 │   │   └── prisma.service.ts      # PrismaService; Prisma schema is prisma/schema.prisma. Real tables: users, grades, classes, class_students, schedules,
 │   │                               # class_sessions, curriculums, chapters, lessons, tuitions,
-│   │                               # notifications, student_scores, ai_messages, attendances,
-│   │                               # exercises, conversations, conversation_participants, messages
-│   │                               # (categories/wallets/transactions are commented-out dead code)
+│   │                               # student_scores, ai_messages, attendances,
+│   │                               # exercises, conversations, conversation_participants, messages,
+│   │                               # tutor_settings, tutor_payment_settings
+│   │                               # (categories/wallets/transactions are commented-out dead code;
+│   │                               # notifications is owned by third-service)
 │   ├── features/                  # class, schedule, session, curriculum, chapter, lesson, tuition,
-│   │                               # exercise, attendance, chat, report, dashboard, agents, user
+│   │                               # exercise, attendance, chat, report, dashboard, agents, user,
+│   │                               # tutor-settings (RPC only), notification (outbound helper, no
+│   │                               # controller), rabbitmq (RmqModule/RmqProducer, global)
 │   │                               # (no email/redis/uploads features here — those live in
-│   │                               # `third-service`; no message-queue module — responder only)
+│   │                               # `third-service`)
 │   └── packages/                  # Shared utilities
 │       ├── configs/               # JWT sign config
 │       ├── decorators/            # @ApiResponse, @Public, @Roles, @CurrentUser decorators
@@ -57,7 +61,8 @@ also has a `{name}.rpc.controller.ts` (see RPC status below).
 RMQ listener on that queue. **All 12 owned features have `@MessagePattern` responders**
 (`class`, `curriculum`, `chapter`, `lesson`, `tuition`, `schedule`, `session`, `exercise`,
 `attendance`, `dashboard`, `agents`, `report`) — this service is reachable from `gateway`.
-`chat` stays realtime-only (`chat.gateway.ts`, Socket.IO), no RPC responder. See
+`chat` stays realtime-only (`chat.gateway.ts`, Socket.IO), no RPC responder. `tutor-settings`
+adds `settings.*` patterns (RPC only, no HTTP controller). See
 `../.claude/rules/architecture.md` and the `add-rpc-endpoint` skill for adding a new pattern.
 
 ## Environment Variables
@@ -87,12 +92,15 @@ to it currently.
 - **One runner: Jest** (+ Supertest for e2e). `bun run test`/`test:e2e` both invoke Jest —
   there is no separate Bun-native test runner despite older docs having claimed one.
 - Unit tests `*.spec.ts`, e2e `*.e2e-spec.ts`, both in `test/`.
+- ESLint type-checks `test/` through `tsconfig.eslint.json` (tsconfig.json only includes `src/`).
+  Type-aware `no-unsafe-*` rules are warnings for `test/` and errors for `src/`.
 
 ## Available Skills
 
 `generate-controller`, `generate-db-table`, `generate-entity`, `generate-feature`,
 `generate-module`, `generate-repository`, `generate-service` — all scoped to this repo's own
-`class`-style layering.
+`class`-style layering. `jev-router` (`.claude/skills/jev-router/`) routes prompts to an agent/model
+via the TypeSafe API through UserPromptSubmit / PreToolUse hooks in `.claude/settings.json`.
 
 ## Available Agents
 

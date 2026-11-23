@@ -1,7 +1,6 @@
 import {
   CanActivate,
   ExecutionContext,
-  Inject,
   Injectable,
   Logger,
   ServiceUnavailableException,
@@ -125,10 +124,11 @@ export class JwtAuthGuard implements CanActivate {
 
     const user = await this.prisma.user.findUnique({
       where: { id: payload.id },
-      select: { id: true },
+      select: { id: true, isActive: true },
     });
 
-    if (!user) {
+    // deactivated accounts are refused even if a session row somehow survived
+    if (!user || user.isActive === false) {
       throw new UnauthorizedException('Unauthorized ...');
     }
 

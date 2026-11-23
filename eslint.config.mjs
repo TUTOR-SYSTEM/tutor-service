@@ -37,7 +37,8 @@ export default tseslint.config(
       },
       sourceType: 'module',
       parserOptions: {
-        projectService: true,
+        // tsconfig.json covers src/**; tsconfig.eslint.json adds test/** (outside its include)
+        project: ['./tsconfig.json', './tsconfig.eslint.json'],
         tsconfigRootDir: import.meta.dirname,
       },
     },
@@ -50,6 +51,33 @@ export default tseslint.config(
       '@typescript-eslint/no-unsafe-argument': 'warn',
       // Không báo lỗi Prettier (gồm CRLF/LF) trong ESLint — vẫn có thể chạy `npm run format` khi cần
       'prettier/prettier': 'off',
+    },
+  },
+  // Test specs were never type-linted before (they were outside tsconfig, so ESLint failed to parse
+  // them). Keep the rules visible as warnings there; src/ stays at error level.
+  {
+    files: ['test/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-unsafe-assignment': 'warn',
+      '@typescript-eslint/no-unsafe-member-access': 'warn',
+      '@typescript-eslint/no-unsafe-call': 'warn',
+      '@typescript-eslint/no-unsafe-argument': 'warn',
+      '@typescript-eslint/no-unsafe-return': 'warn',
+      '@typescript-eslint/no-unnecessary-type-assertion': 'warn',
+      '@typescript-eslint/require-await': 'warn',
+      '@typescript-eslint/unbound-method': 'warn',
+      '@typescript-eslint/no-redundant-type-constituents': 'warn',
+      '@typescript-eslint/no-base-to-string': 'warn',
+      '@typescript-eslint/no-misused-promises': 'warn',
+      '@typescript-eslint/no-unsafe-enum-comparison': 'warn',
+      '@typescript-eslint/no-unused-expressions': 'warn',
+      '@typescript-eslint/no-empty-object-type': 'warn',
+      '@typescript-eslint/no-unsafe-function-type': 'warn',
+      '@typescript-eslint/no-wrapper-object-types': 'warn',
+      '@typescript-eslint/no-require-imports': 'warn',
+      '@typescript-eslint/no-floating-promises': 'warn',
+      '@typescript-eslint/no-this-alias': 'warn',
+      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
     },
   },
   // ioredis / nodemailer + bcrypt + @nestjs/jwt: một số môi trường IDE/projectService báo "type could not be resolved" → no-unsafe-* nhiễu; vẫn kiểm tra bằng tsc
