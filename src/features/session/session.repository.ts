@@ -56,7 +56,6 @@ export class SessionRepository {
   // list every session across the classes the user owns (tutor) or is enrolled in (student)
   async getAll({
     userId,
-    role,
     query,
   }: {
     userId: string;
@@ -146,16 +145,21 @@ export class SessionRepository {
             subject: true,
             curriculumId: true,
             tutorId: true,
+            location: true,
+            format: true,
           },
         },
         lesson: { select: { id: true, title: true, chapter: { select: { title: true } } } },
+        // chỉ các trường công khai của gia sư (không lộ email/SĐT)
+        tutor: { select: { id: true, firstName: true, lastName: true, avatar: true } },
       },
     });
     if (!row) return null;
 
-    const { lesson, ...session } = row;
+    const { lesson, tutor, ...session } = row;
     return {
       ...session,
+      tutor,
       lesson: lesson
         ? { id: lesson.id, title: lesson.title, chapterTitle: lesson.chapter?.title ?? null }
         : null,
@@ -177,6 +181,39 @@ export class SessionRepository {
       select: { id: true },
     });
     return !!row;
+  }
+
+  /** Students who already have an exercise row for this session (assigned or submitted). */
+  async findExerciseStudentIds({ sessionId }: { sessionId: string }) {
+    const rows = await this.prisma.exercise.findMany({
+      where: { sessionId },
+      select: { studentId: true },
+    });
+    return rows.map((row) => row.studentId);
+  }
+
+  /** Giao bài tập: tạo dòng exercise ASSIGNED (chưa nộp) cho từng học sinh. */
+  async createAssignedExercises({
+    sessionId,
+    tutorId,
+    studentIds,
+  }: {
+    sessionId: string;
+    tutorId: string;
+    studentIds: string[];
+  }) {
+    if (studentIds.length === 0) return;
+    await this.prisma.exercise.createMany({
+      data: studentIds.map((studentId) => ({
+        sessionId,
+        tutorId,
+        studentId,
+        status: 'ASSIGNED' as const,
+        exerciseUrls: [],
+      })),
+      // unique (session_id, student_id): a concurrent "complete" call skips rows it lost to
+      skipDuplicates: true,
+    });
   }
 
   async update({ id, data }: { id: string; data: UpdateSessionDto }) {

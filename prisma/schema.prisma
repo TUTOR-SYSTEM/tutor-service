@@ -92,6 +92,7 @@ enum AssignmentStatus {
 }
 
 enum ExerciseStatus {
+  ASSIGNED
   SUBMITTED
   GRADED
   RESUBMIT
@@ -222,6 +223,8 @@ model User {
   attendances               Attendance[]
   exercisesAsTutor          Exercise[]                @relation("ExerciseTutor")
   exercisesAsStudent        Exercise[]                @relation("ExerciseStudent")
+  tutorSetting              TutorSetting?
+  tutorPaymentSetting       TutorPaymentSetting?
   conversationsCreated      Conversation[]
   conversationParticipation ConversationParticipant[]
   messagesSent              Message[]
@@ -485,6 +488,8 @@ model Exercise {
   tutor   User          @relation("ExerciseTutor", fields: [tutorId], references: [id], onDelete: Cascade)
   student User          @relation("ExerciseStudent", fields: [studentId], references: [id], onDelete: Cascade)
 
+  // one exercise row per (session, student); NULL sessionId rows are not constrained
+  @@unique([sessionId, studentId], map: "exercises_session_id_student_id_key")
   @@map("exercises")
 }
 
@@ -754,4 +759,39 @@ model ApiCatalog {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
 
   @@map("api_catalog")
+}
+
+/// Cài đặt giảng dạy của gia sư (mặc định buổi học, học phí, múi giờ, giờ làm việc, công tắc).
+model TutorSetting {
+  tutorId               String   @id @map("tutor_id") @db.Uuid
+  sessionDurationMinutes Int     @default(90) @map("session_duration_minutes")
+  defaultFee            Decimal  @default(250000) @map("default_fee") @db.Decimal(14, 2)
+  timezone              String   @default("hanoi") @db.VarChar(64)
+  workHoursStart        String   @default("08:00") @map("work_hours_start") @db.VarChar(5)
+  workHoursEnd          String   @default("21:00") @map("work_hours_end") @db.VarChar(5)
+  remindStudents        Boolean  @default(true) @map("remind_students")
+  allowOnlineBooking    Boolean  @default(true) @map("allow_online_booking")
+  autoInvoiceMonthly    Boolean  @default(false) @map("auto_invoice_monthly")
+  breakBetweenSessions  Boolean  @default(false) @map("break_between_sessions")
+  updatedAt             DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  tutor User @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+
+  @@map("tutor_settings")
+}
+
+/// Tài khoản nhận học phí của gia sư và các công tắc thanh toán.
+model TutorPaymentSetting {
+  tutorId              String   @id @map("tutor_id") @db.Uuid
+  bankName             String   @default("") @map("bank_name") @db.VarChar(100)
+  accountHolder        String   @default("") @map("account_holder") @db.VarChar(255)
+  accountNumber        String   @default("") @map("account_number") @db.VarChar(30)
+  branch               String   @default("") @db.VarChar(255)
+  autoPaymentReminder  Boolean  @default(true) @map("auto_payment_reminder")
+  electronicReceipt    Boolean  @default(false) @map("electronic_receipt")
+  updatedAt            DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  tutor User @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+
+  @@map("tutor_payment_settings")
 }

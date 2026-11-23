@@ -4,6 +4,7 @@ import type {
   CreateExerciseDto,
   getExerciseDto,
   GradeExerciseDto,
+  RequestResubmitExerciseDto,
   SubmitExerciseDto,
 } from '@packages/entities/exercise';
 import { ExerciseService } from './exercise.service';
@@ -42,6 +43,19 @@ export class ExerciseRpcController {
   @MessagePattern('exercise.grade')
   grade(@Payload() payload: { userId: string; role?: string; id: string; data: GradeExerciseDto }) {
     return this.exerciseService.gradeExerciseService(payload);
+  }
+
+  @MessagePattern('exercise.requestResubmit')
+  requestResubmit(
+    @Payload()
+    payload: {
+      userId: string;
+      role?: string;
+      id: string;
+      data: RequestResubmitExerciseDto;
+    },
+  ) {
+    return this.exerciseService.requestResubmitService(payload);
   }
 
   /** Gateway → kiểm tra quyền tải file trước khi xin presigned URL từ service upload. */

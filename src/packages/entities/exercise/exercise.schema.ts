@@ -6,7 +6,7 @@ const fileUrlSchema = z.object({
   key: z.string(),
 });
 
-export const exerciseStatusEnum = z.enum(['SUBMITTED', 'GRADED', 'RESUBMIT']);
+export const exerciseStatusEnum = z.enum(['ASSIGNED', 'SUBMITTED', 'GRADED', 'RESUBMIT']);
 
 export const createExerciseSchema = z.object({
   tutorId: z
@@ -47,6 +47,11 @@ export const gradeExerciseSchema = z.object({
   comment: z.string().max(2000).optional().nullable(),
   // Đáp án gia sư tải lên khi chấm (không gửi = giữ nguyên đáp án đã lưu).
   answerKeyUrls: z.array(fileUrlSchema).max(5).optional(),
+});
+
+/** Tutor asks the student to submit again; optional comment is shown to the student. */
+export const requestResubmitExerciseSchema = z.object({
+  comment: z.string().max(2000).optional().nullable(),
 });
 
 export const getExerciseQuerySchema = z.object({

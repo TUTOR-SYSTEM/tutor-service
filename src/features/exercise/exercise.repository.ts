@@ -81,7 +81,15 @@ export class ExerciseRepository {
    * - bài giảng (lesson): mọi TUTOR.
    * Dùng `position(key in cột::text)` thay LIKE để key không bị hiểu như wildcard.
    */
-  async canAccessFile({ key, userId, role }: { key: string; userId: string; role?: string | null }) {
+  async canAccessFile({
+    key,
+    userId,
+    role,
+  }: {
+    key: string;
+    userId: string;
+    role?: string | null;
+  }) {
     if (role === 'ADMIN') return true;
     const rows = await this.prisma.$queryRaw<{ ok: boolean }[]>`
       SELECT (
@@ -137,7 +145,6 @@ export class ExerciseRepository {
   // narrowed by the optional query filters.
   async findAll({
     userId,
-    role,
     query,
   }: {
     userId: string;
@@ -149,11 +156,7 @@ export class ExerciseRepository {
     // tutor (owner), the student on the row, or the PARENT of that student (student.parentId)
     const conditions: Prisma.ExerciseWhereInput[] = [
       {
-        OR: [
-          { tutorId: userId },
-          { studentId: userId },
-          { student: { parentId: userId } },
-        ],
+        OR: [{ tutorId: userId }, { studentId: userId }, { student: { parentId: userId } }],
       },
     ];
     if (sessionId) conditions.push({ sessionId });

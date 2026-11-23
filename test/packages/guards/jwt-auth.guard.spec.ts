@@ -47,12 +47,11 @@ describe('JwtAuthGuard (session + active-user checks)', () => {
     jwt = { verify: jest.fn().mockReturnValue(accessClaims()) };
     reflector = { getAllAndOverride: jest.fn().mockReturnValue(false) };
     userRows = [{ id: USER_ID, isActive: true }];
+    // the guard reads the user with prisma.user.findUnique (`userRows` = the current row, if any)
     db = {
-      select: jest.fn(() => ({
-        from: () => ({
-          where: () => ({ limit: () => Promise.resolve(userRows) }),
-        }),
-      })),
+      user: {
+        findUnique: jest.fn(() => Promise.resolve(userRows[0] ?? null)),
+      },
     };
     rmq = { send: jest.fn().mockResolvedValue(true) };
     const config = { get: jest.fn().mockReturnValue('access-secret') } as unknown as ConfigService;
@@ -89,7 +88,7 @@ describe('JwtAuthGuard (session + active-user checks)', () => {
     const { context } = contextFor('Bearer legacy');
 
     await expect(guard.canActivate(context)).rejects.toThrow(UnauthorizedException);
-    expect(db.select).not.toHaveBeenCalled();
+    expect(db.user.findUnique).not.toHaveBeenCalled();
     expect(rmq.send).not.toHaveBeenCalled();
   });
 

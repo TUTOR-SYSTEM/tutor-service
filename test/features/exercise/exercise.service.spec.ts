@@ -12,6 +12,7 @@ import { UserService } from 'src/features/user/user.service';
 import { SessionService } from 'src/features/session/session.service';
 import { LessonService } from 'src/features/lesson/lesson.service';
 import { ClassService } from 'src/features/class/class.service';
+import { NotificationNotifier } from 'src/features/notification/notification.notifier';
 
 // session/lesson services transitively load an ESM-only dep (uuid) via their repositories;
 // this spec only needs the tokens, so swap the modules for bare classes
@@ -36,6 +37,7 @@ describe('ExerciseService', () => {
   let sessionService: { getSessionService: jest.Mock };
   let lessonService: { getLessonByIdService: jest.Mock };
   let classService: { isStudentInClassService: jest.Mock };
+  let notifier: { notifyUsers: jest.Mock };
 
   const baseCreate = {
     studentId: STUDENT_ID,
@@ -67,6 +69,7 @@ describe('ExerciseService', () => {
         .mockResolvedValue({ id: SESSION_ID, classId: CLASS_ID, class: { tutorId: TUTOR_ID } }),
     };
     classService = { isStudentInClassService: jest.fn().mockResolvedValue(true) };
+    notifier = { notifyUsers: jest.fn().mockResolvedValue(undefined) };
     lessonService = { getLessonByIdService: jest.fn().mockResolvedValue({ id: LESSON_ID }) };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -77,6 +80,7 @@ describe('ExerciseService', () => {
         { provide: SessionService, useValue: sessionService },
         { provide: LessonService, useValue: lessonService },
         { provide: ClassService, useValue: classService },
+        { provide: NotificationNotifier, useValue: notifier },
       ],
     }).compile();
 
@@ -338,6 +342,34 @@ describe('ExerciseService', () => {
       expect(patch.gradedAt).toBeInstanceOf(Date);
     });
 
+    it('notifies the student with the score after grading', async () => {
+      repo.findById.mockResolvedValue({
+        id: EXERCISE_ID,
+        tutorId: TUTOR_ID,
+        studentId: STUDENT_ID,
+      });
+      repo.update.mockResolvedValue({ id: EXERCISE_ID, status: 'GRADED' });
+
+      await service.gradeExerciseService({
+        userId: TUTOR_ID,
+        role: 'TUTOR',
+        id: EXERCISE_ID,
+        data: { score: 8.5 } as never,
+      });
+
+      expect(notifier.notifyUsers).toHaveBeenCalledWith(
+        expect.objectContaining({
+          role: 'TUTOR',
+          senderId: TUTOR_ID,
+          recipients: [STUDENT_ID],
+          type: 'STUDENT',
+          title: 'Bài tập đã được chấm',
+          redirectUrl: '/grades',
+        }),
+      );
+      expect(notifier.notifyUsers.mock.calls[0][0].content).toContain('8.5/10');
+    });
+
     it('stores a null comment when none is provided', async () => {
       repo.findById.mockResolvedValue({ id: EXERCISE_ID, tutorId: TUTOR_ID });
       repo.update.mockResolvedValue({});
@@ -378,6 +410,222 @@ describe('ExerciseService', () => {
           data: { score: 1 } as never,
         }),
       ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('student submission -> notify tutor', () => {
+    const row = {
+      id: EXERCISE_ID,
+      tutorId: TUTOR_ID,
+      studentId: STUDENT_ID,
+      sessionId: SESSION_ID,
+    };
+
+    it('submit notifies the tutor with a TUTOR-type payload (no classId/studentId)', async () => {
+      repo.findById.mockResolvedValue({ ...row, status: 'RESUBMIT' });
+      repo.update.mockResolvedValue({ ...row, status: 'SUBMITTED' });
+      (userService as Record<string, jest.Mock>).getUserByField = jest
+        .fn()
+        .mockResolvedValue([{ firstName: 'An', lastName: 'Nguyen' }]);
+      sessionService.getSessionService.mockResolvedValue({ sessionNumber: 3 });
+
+      await service.submitExerciseService({
+        userId: STUDENT_ID,
+        role: 'STUDENT',
+        id: EXERCISE_ID,
+        data: { exerciseUrls: [] } as never,
+      });
+
+      const arg = notifier.notifyUsers.mock.calls[0][0];
+      expect(arg).toMatchObject({
+        role: 'STUDENT',
+        senderId: STUDENT_ID,
+        recipients: [TUTOR_ID],
+        type: 'TUTOR',
+        title: 'Học sinh đã nộp bài tập',
+        redirectUrl: '/grades',
+      });
+      expect(arg.content).toContain('Nguyen An');
+      expect(arg.content).toContain('Buổi 3');
+      expect(arg).not.toHaveProperty('studentId');
+      expect(arg).not.toHaveProperty('classId');
+    });
+
+    it('falls back to a generic name when the name lookup fails', async () => {
+      repo.findById.mockResolvedValue({ ...row, status: 'SUBMITTED' });
+      repo.update.mockResolvedValue(row);
+
+      await service.submitExerciseService({
+        userId: STUDENT_ID,
+        role: 'STUDENT',
+        id: EXERCISE_ID,
+        data: { exerciseUrls: [] } as never,
+      });
+      expect(notifier.notifyUsers.mock.calls[0][0].content).toContain('Một học sinh');
+    });
+
+    it('does not notify when the update fails (already graded)', async () => {
+      repo.findById.mockResolvedValue({ ...row, status: 'SUBMITTED' });
+      repo.update.mockResolvedValue(null);
+      await expect(
+        service.submitExerciseService({
+          userId: STUDENT_ID,
+          role: 'STUDENT',
+          id: EXERCISE_ID,
+          data: { exerciseUrls: [] } as never,
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(notifier.notifyUsers).not.toHaveBeenCalled();
+    });
+
+    it('does not notify when an ADMIN submits on behalf of the student', async () => {
+      repo.findById.mockResolvedValue({ ...row, status: 'SUBMITTED' });
+      repo.update.mockResolvedValue(row);
+      await service.submitExerciseService({
+        userId: OTHER_ID,
+        role: 'ADMIN',
+        id: EXERCISE_ID,
+        data: { exerciseUrls: [] } as never,
+      });
+      expect(notifier.notifyUsers).not.toHaveBeenCalled();
+    });
+
+    it('does not notify when the tutor records a first submission for the student', async () => {
+      repo.create.mockResolvedValue(row);
+      await service.createExerciseService({
+        userId: TUTOR_ID,
+        role: 'TUTOR',
+        data: { ...baseCreate, sessionId: undefined } as never,
+      });
+      expect(notifier.notifyUsers).not.toHaveBeenCalled();
+    });
+
+    it('notifies the tutor on a first submission and on ASSIGNED -> SUBMITTED', async () => {
+      repo.create.mockResolvedValue(row);
+      await service.createExerciseService({
+        userId: STUDENT_ID,
+        role: 'STUDENT',
+        data: baseCreate as never,
+      });
+      expect(notifier.notifyUsers).toHaveBeenCalledTimes(1);
+
+      repo.findByStudentSession.mockResolvedValue({ id: EXERCISE_ID, status: 'ASSIGNED' });
+      repo.update.mockResolvedValue(row);
+      await service.createExerciseService({
+        userId: STUDENT_ID,
+        role: 'STUDENT',
+        data: baseCreate as never,
+      });
+      expect(notifier.notifyUsers).toHaveBeenCalledTimes(2);
+      expect(notifier.notifyUsers.mock.calls[1][0]).toMatchObject({
+        type: 'TUTOR',
+        recipients: [TUTOR_ID],
+      });
+    });
+  });
+
+  describe('requestResubmitService', () => {
+    const found = {
+      id: EXERCISE_ID,
+      tutorId: TUTOR_ID,
+      studentId: STUDENT_ID,
+      sessionId: SESSION_ID,
+      status: 'GRADED',
+    };
+
+    it('sets RESUBMIT (keeping files) and notifies the student', async () => {
+      repo.findById.mockResolvedValue(found);
+      repo.update.mockResolvedValue({ ...found, status: 'RESUBMIT' });
+      sessionService.getSessionService.mockResolvedValue({ sessionNumber: 2 });
+
+      const res = await service.requestResubmitService({
+        userId: TUTOR_ID,
+        role: 'TUTOR',
+        id: EXERCISE_ID,
+        data: { comment: 'Làm lại câu 2' },
+      });
+
+      expect(res).toMatchObject({ status: 'RESUBMIT' });
+      expect(repo.update).toHaveBeenCalledWith({
+        id: EXERCISE_ID,
+        data: { status: 'RESUBMIT', comment: 'Làm lại câu 2' },
+      });
+      expect(notifier.notifyUsers).toHaveBeenCalledWith(
+        expect.objectContaining({
+          role: 'TUTOR',
+          senderId: TUTOR_ID,
+          recipients: [STUDENT_ID],
+          type: 'STUDENT',
+          title: 'Yêu cầu nộp lại bài tập',
+          redirectUrl: '/grades',
+        }),
+      );
+      const content = notifier.notifyUsers.mock.calls[0][0].content;
+      expect(content).toContain('Buổi 2');
+      expect(content).toContain('Làm lại câu 2');
+    });
+
+    it('does not touch the comment when none is given', async () => {
+      repo.findById.mockResolvedValue(found);
+      repo.update.mockResolvedValue({ ...found, status: 'RESUBMIT' });
+      await service.requestResubmitService({
+        userId: TUTOR_ID,
+        role: 'TUTOR',
+        id: EXERCISE_ID,
+        data: {},
+      });
+      expect(repo.update).toHaveBeenCalledWith({ id: EXERCISE_ID, data: { status: 'RESUBMIT' } });
+    });
+
+    it('rejects an ASSIGNED (never submitted) exercise', async () => {
+      repo.findById.mockResolvedValue({ ...found, status: 'ASSIGNED' });
+      await expect(
+        service.requestResubmitService({
+          userId: TUTOR_ID,
+          role: 'TUTOR',
+          id: EXERCISE_ID,
+          data: {},
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('forbids another tutor and the student', async () => {
+      repo.findById.mockResolvedValue(found);
+      for (const [userId, role] of [
+        [OTHER_ID, 'TUTOR'],
+        [STUDENT_ID, 'STUDENT'],
+      ]) {
+        await expect(
+          service.requestResubmitService({ userId, role, id: EXERCISE_ID, data: {} }),
+        ).rejects.toThrow(ForbiddenException);
+      }
+      expect(repo.update).not.toHaveBeenCalled();
+      expect(notifier.notifyUsers).not.toHaveBeenCalled();
+    });
+
+    it('returns NotFound for a missing exercise or a vanished row', async () => {
+      repo.findById.mockResolvedValueOnce(null);
+      await expect(
+        service.requestResubmitService({
+          userId: TUTOR_ID,
+          role: 'TUTOR',
+          id: EXERCISE_ID,
+          data: {},
+        }),
+      ).rejects.toThrow(NotFoundException);
+
+      repo.findById.mockResolvedValueOnce(found);
+      repo.update.mockResolvedValueOnce(null);
+      await expect(
+        service.requestResubmitService({
+          userId: TUTOR_ID,
+          role: 'TUTOR',
+          id: EXERCISE_ID,
+          data: {},
+        }),
+      ).rejects.toThrow(NotFoundException);
+      expect(notifier.notifyUsers).not.toHaveBeenCalled();
     });
   });
 });

@@ -18,6 +18,7 @@ import { LessonModule } from './features/lesson/lesson.module';
 import { ReportModule } from './features/report/report.module';
 import { ScheduleModule } from './features/schedule/schedule.module';
 import { SessionModule } from './features/session/session.module';
+import { TutorSettingsModule } from './features/tutor-settings/tutor-settings.module';
 import { TuitionModule } from './features/tuition/tuition.module';
 import { JwtAuthGuard, LanguageGuard } from './packages/guards';
 import { APP_GUARD } from '@nestjs/core';
@@ -39,6 +40,7 @@ import { RmqModule } from './features/rabbitmq/rmq.module';
     TuitionModule,
     ScheduleModule,
     SessionModule,
+    TutorSettingsModule,
     ExerciseModule,
     CourseProgressModule,
     ApiRoutesModule,

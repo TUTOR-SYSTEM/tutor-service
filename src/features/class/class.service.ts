@@ -18,6 +18,7 @@ import {
 } from '@packages/entities/class';
 import { canActOnOwned, checkUuidValid, generateCode } from '@packages/helpers';
 import { UserService } from '../user/user.service';
+import { NotificationNotifier } from '../notification/notification.notifier';
 import { ERROR_MESSAGES } from 'src/data/constants';
 
 /** Sĩ số mặc định của lớp nhóm (lớp 1 kèm 1 là 1). */
@@ -29,6 +30,7 @@ export class ClassService {
   constructor(
     private readonly repo: ClassRepository,
     private readonly user: UserService,
+    private readonly notifier: NotificationNotifier,
   ) {}
 
   async generateNewCodeService(): Promise<string> {
@@ -262,6 +264,10 @@ export class ClassService {
     return classData;
   }
 
+  async getRosterStudentIdsService({ classId }: { classId: string }) {
+    return this.repo.getRosterStudentIds({ classId });
+  }
+
   // enrolment check used by other features (e.g. exercise submissions must belong to the class)
   async isStudentInClassService({ classId, studentId }: { classId: string; studentId: string }) {
     return this.repo.isEnrolled({ userId: studentId, classId });
@@ -414,6 +420,16 @@ export class ClassService {
     });
     const addedIds = inserted.map((row) => row.studentId);
 
+    await this.notifier.notifyUsers({
+      role,
+      senderId: userId,
+      recipients: addedIds,
+      type: 'STUDENT',
+      title: `Bạn đã được thêm vào lớp ${classData.name}`,
+      content: `Bạn đã được thêm vào lớp ${classData.name}.`,
+      redirectUrl: `/classes/${classId}`,
+    });
+
     return {
       classId,
       added: addedIds.length,
@@ -527,10 +543,11 @@ export class ClassService {
   }) {
     const { classData, isOwner } = await this.loadAccessibleClass({ userId, role, id });
 
-    const [students, schedules, recentSessionRow] = await Promise.all([
+    const [students, schedules, recentSessionRow, tutor] = await Promise.all([
       this.repo.getAllStudent({ id }).then((rows) => (isOwner ? rows : this.toPublicRoster(rows))),
       this.repo.getSchedulesByClass({ classId: id }),
       this.repo.getRecentSessionByClass({ classId: id }),
+      classData.tutorId ? this.repo.getPublicTutor({ tutorId: classData.tutorId }) : null,
     ]);
 
     // hide bài tập (exerciseUrls) from non-owners until the session has ended — mirrors
@@ -540,7 +557,7 @@ export class ClassService {
         ? { ...recentSessionRow, exerciseUrls: [] }
         : recentSessionRow;
 
-    return { class: classData, recentSession: recentSession ?? null, schedules, students };
+    return { class: classData, tutor, recentSession: recentSession ?? null, schedules, students };
   }
 
   async getAllStudentsService({

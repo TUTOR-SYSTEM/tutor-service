@@ -15,9 +15,11 @@ import {
   createExerciseSchema,
   getExerciseQuerySchema,
   gradeExerciseSchema,
+  requestResubmitExerciseSchema,
   submitExerciseSchema,
   type CreateExerciseDto,
   type GradeExerciseDto,
+  type RequestResubmitExerciseDto,
   type SubmitExerciseDto,
   type getExerciseDto,
 } from '@packages/entities/exercise';
@@ -141,6 +143,29 @@ export class ExerciseController {
     dto: GradeExerciseDto,
   ) {
     return this.exerciseService.gradeExerciseService({
+      userId: user?.id,
+      role: user?.role,
+      id,
+      data: dto,
+    });
+  }
+
+  // todo : tutor asks the student to submit again ...
+  @Patch('request-resubmit/:id')
+  @HttpCode(StatusCodes.OK)
+  @ApiOperation({
+    summary: 'Request exercise re-submission',
+    description: 'Set a submitted exercise to RESUBMIT (optional comment for the student)',
+  })
+  @ApiParam({ name: 'id', type: String, format: 'uuid' })
+  @SwaggerResponse({ status: StatusCodes.OK, description: 'Re-submission requested' })
+  requestResubmit(
+    @CurrentUser() user: Record<string, string>,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe<RequestResubmitExerciseDto>(requestResubmitExerciseSchema))
+    dto: RequestResubmitExerciseDto,
+  ) {
+    return this.exerciseService.requestResubmitService({
       userId: user?.id,
       role: user?.role,
       id,

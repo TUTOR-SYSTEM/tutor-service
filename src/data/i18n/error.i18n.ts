@@ -172,6 +172,14 @@ export const ERROR_TRANSLATIONS = {
     vi: 'Bài tập đã được nộp cho buổi học này',
     en: 'Exercise already submitted for this session',
   },
+  EXERCISE_NOT_SUBMITTED: {
+    vi: 'Học sinh chưa nộp bài tập — không thể chấm',
+    en: 'Student has not submitted this exercise yet',
+  },
+  EXERCISE_RESUBMIT_REQUIRED: {
+    vi: 'Bài tập đang yêu cầu nộp lại — học sinh hãy dùng chức năng nộp bài',
+    en: 'Exercise is awaiting a re-submission — the student must use the submit endpoint',
+  },
   EXERCISE_ALREADY_GRADED: {
     vi: 'Bài tập đã được chấm — không thể nộp lại',
     en: 'Exercise already graded — cannot re-submit',

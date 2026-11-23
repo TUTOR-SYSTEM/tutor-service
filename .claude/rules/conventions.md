@@ -9,7 +9,8 @@
   Reference config via `process.env` / `ConfigModule`.
 - **Style**: single quotes, trailing commas, 100-char width, semicolons. Formatting/lint is
   auto-applied by a PostToolUse hook, so match surrounding code and let the hook normalize it.
-- **Auth**: routes are guarded globally by `JwtAuthGuard`; add `@Public()` only for
+- **Auth**: `JwtAuthGuard` also refuses a user row whose `isActive === false`, on top of the
+  redis session check. Routes are guarded globally by `JwtAuthGuard`; add `@Public()` only for
   intentionally open endpoints, and `@Roles('ADMIN')` (from `@packages/decorators`, paired with
   `RolesGuard` from `@packages/guards`) for admin-only ones. `AdminRoleGuard` is also available
   in `@packages/guards`. Read the acting user with `@CurrentUser()` from `@packages/decorators`

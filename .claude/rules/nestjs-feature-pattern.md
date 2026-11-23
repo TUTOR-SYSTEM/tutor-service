@@ -36,6 +36,9 @@ this is now an education / tutoring domain.)
   that session's class tutor (otherwise a student could name themselves tutor and self-grade).
 - **Chat WebSocket**: `conversation:join` and `message:read` check `conversation_participants`;
   `typing:*` only works for sockets that already joined the room.
+- **Chat membership**: `addParticipant` refuses DIRECT conversations (`CHAT_DIRECT_NO_ADD_PARTICIPANT`)
+  and runs `assertCanChatWithAll` on the new member, the same policy as DM and group create.
+  `ADMIN` may chat with anyone; `TUTOR` needs a class link to students/parents.
 - **Validate optional cross-entity FKs in the service, not the DB.** Before an insert/update,
   check that any optional foreign-key value (e.g. `lessonId`, `tutorId`) actually references an
   existing row — inject the owning service (`LessonService.getLessonByIdService`,
@@ -101,13 +104,27 @@ this is now an education / tutoring domain.)
   (`@packages/helpers`), `ZodValidationPipe` (`@packages/pipes`), `@CurrentUser`/`@Public`/
   `@Admin` (`@packages/decorators`). Never re-implement pagination, validation, or UUID checks,
   and do not use the old `@User` decorator.
-- **Infra modules**: none live here any more (`redis`/`email`/`uploads` moved to
-  `third-service`; the old `rabbitmq` pub/sub module was removed). If one is added, it's a
-  deliberate exception to the layering above: `@Global()` module, one `Service` owning the
-  connection lifecycle (`OnModuleInit`/`OnModuleDestroy`, config via `ConfigService`, `Logger`
-  not `console.log`), exported so any feature can inject it directly. Inbound RPC is the RMQ
-  microservice `main.ts` opens on `tutor_queue`; if this service ever needs to *call* another
-  one, copy gateway's `src/features/rabbitmq/` (`RmqModule`/`RmqProducer`) as `user` did.
+- **Infra modules**: `redis`/`email`/`uploads` live in `third-service`, not here. The RMQ
+  client is back in this repo as `src/features/rabbitmq/` (`RmqModule` is `@Global()`,
+  `RmqProducer.send(pattern, payload, timeout, retries)`) — copied from gateway, used to *call*
+  `third-service` (`notification.create`). Any new infra module is a deliberate exception to the
+  layering above: `@Global()` module, one `Service` owning the connection lifecycle
+  (`OnModuleInit`/`OnModuleDestroy`, config via `ConfigService`, `Logger` not `console.log`),
+  exported so any feature can inject it directly. Inbound RPC is the RMQ microservice `main.ts`
+  opens on `tutor_queue`.
+- **Outbound notifications** go through `NotificationNotifier` (`src/features/notification/`,
+  `notifyUsers({ role, senderId, recipients, type, title, content, redirectUrl })`). It is
+  send-only: no controller, no repository, no `.rpc.controller.ts` — the same kind of exception as
+  `user`. Never send `classId` (third-service would fan out to the whole class); send one
+  `notification.create` per recipient id. Failures are logged as warnings and never fail the
+  business call. Pass the acting `role` (third-service only lets TUTOR/ADMIN create `STUDENT`
+  notifications).
+- **`src/features/tutor-settings/*`** is an RPC-only domain feature: `settings.*` message patterns
+  (teaching/payment get + update) backed by `tutor_settings` / `tutor_payment_settings` (1:1 with
+  `users`, keyed by `tutor_id`). It has no HTTP controller — the gateway reaches it over RMQ only.
+- **Exercise status lifecycle**: `ASSIGNED` (created by session completion, not yet submitted) →
+  `SUBMITTED` → `GRADED`; a tutor may set `RESUBMIT` (student re-submits through the submit
+  endpoint, not `create`). Grade rejects `ASSIGNED` rows (`EXERCISE_NOT_SUBMITTED`).
 - **`src/features/user/*`** is a deliberate exception too — a read-only lookup (`getUserByField`)
   against the shared `users` table (this DB and `user`'s DB are the same Postgres instance).
   No controller, no `.rpc.controller.ts`, not a domain feature — don't add write methods or a
