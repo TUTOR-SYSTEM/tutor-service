@@ -461,7 +461,11 @@ export class ClassService {
     if (!classData || !canActOnOwned({ userId, role }, classData.tutorId))
       throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
 
-    const removed = await this.repo.removeStudent({ classId, studentId });
+    const removed = await this.repo.removeStudent({
+      classId,
+      studentId,
+      tutorId: classData.tutorId,
+    });
     if (removed === 0) throw new NotFoundException(ERROR_MESSAGES.STUDENT_NOT_IN_CLASS);
 
     return { classId, studentId, removed: true };

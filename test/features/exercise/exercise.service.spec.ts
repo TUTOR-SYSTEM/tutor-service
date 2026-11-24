@@ -89,30 +89,36 @@ describe('ExerciseService', () => {
 
   describe('createExerciseService', () => {
     it('creates a SUBMITTED exercise when the acting user is the student', async () => {
-      repo.create.mockResolvedValue({ id: EXERCISE_ID });
+      repo.create.mockResolvedValue({
+        id: EXERCISE_ID,
+        tutorId: 'tutor-x',
+        status: 'SUBMITTED',
+        answerKeyUrls: [{ name: 'k', url: 'u', key: 'k' }],
+      });
 
       const result = await service.createExerciseService({
         userId: STUDENT_ID,
-        data: baseCreate as never,
+        data: baseCreate,
       });
 
       expect(repo.create).toHaveBeenCalledWith({
         data: { ...baseCreate, status: 'SUBMITTED' },
       });
-      expect(result).toEqual({ id: EXERCISE_ID });
+      // a student must not receive the answer key before the exercise is graded
+      expect(result).toMatchObject({ id: EXERCISE_ID, answerKeyUrls: [] });
     });
 
     it('allows the tutor of the exercise to create it as well', async () => {
       repo.create.mockResolvedValue({ id: EXERCISE_ID });
 
       await expect(
-        service.createExerciseService({ userId: TUTOR_ID, data: baseCreate as never }),
+        service.createExerciseService({ userId: TUTOR_ID, data: baseCreate }),
       ).resolves.toBeDefined();
     });
 
     it('forbids a third party from submitting on behalf of someone else', async () => {
       await expect(
-        service.createExerciseService({ userId: OTHER_ID, data: baseCreate as never }),
+        service.createExerciseService({ userId: OTHER_ID, data: baseCreate }),
       ).rejects.toThrow(new ForbiddenException(ERROR_MESSAGES.EXERCISE_SUBMIT_NOT_ALLOWED));
       expect(repo.create).not.toHaveBeenCalled();
     });
@@ -121,7 +127,7 @@ describe('ExerciseService', () => {
       await expect(
         service.createExerciseService({
           userId: STUDENT_ID,
-          data: { ...baseCreate, tutorId: STUDENT_ID } as never,
+          data: { ...baseCreate, tutorId: STUDENT_ID },
         }),
       ).rejects.toThrow(new ForbiddenException(ERROR_MESSAGES.EXERCISE_SUBMIT_NOT_ALLOWED));
       expect(repo.create).not.toHaveBeenCalled();
@@ -135,7 +141,7 @@ describe('ExerciseService', () => {
       });
 
       await expect(
-        service.createExerciseService({ userId: STUDENT_ID, data: baseCreate as never }),
+        service.createExerciseService({ userId: STUDENT_ID, data: baseCreate }),
       ).rejects.toThrow(new ForbiddenException(ERROR_MESSAGES.EXERCISE_SUBMIT_NOT_ALLOWED));
       expect(repo.create).not.toHaveBeenCalled();
     });
@@ -144,7 +150,7 @@ describe('ExerciseService', () => {
       userService.getUserRolesByIds.mockResolvedValue([{ id: TUTOR_ID, role: 'TUTOR' }]);
 
       await expect(
-        service.createExerciseService({ userId: STUDENT_ID, data: baseCreate as never }),
+        service.createExerciseService({ userId: STUDENT_ID, data: baseCreate }),
       ).rejects.toThrow(NotFoundException);
       expect(repo.create).not.toHaveBeenCalled();
     });
@@ -153,7 +159,7 @@ describe('ExerciseService', () => {
       lessonService.getLessonByIdService.mockResolvedValue(null);
 
       await expect(
-        service.createExerciseService({ userId: STUDENT_ID, data: baseCreate as never }),
+        service.createExerciseService({ userId: STUDENT_ID, data: baseCreate }),
       ).rejects.toThrow(new NotFoundException(ERROR_MESSAGES.LESSON_NOT_FOUND));
       expect(sessionService.getSessionService).toHaveBeenCalledWith({
         userId: STUDENT_ID,
@@ -166,7 +172,7 @@ describe('ExerciseService', () => {
       sessionService.getSessionService.mockRejectedValue(new NotFoundException());
 
       await expect(
-        service.createExerciseService({ userId: STUDENT_ID, data: baseCreate as never }),
+        service.createExerciseService({ userId: STUDENT_ID, data: baseCreate }),
       ).rejects.toThrow(NotFoundException);
       expect(repo.create).not.toHaveBeenCalled();
     });
@@ -175,7 +181,7 @@ describe('ExerciseService', () => {
       repo.findByStudentSession.mockResolvedValue({ id: EXERCISE_ID });
 
       await expect(
-        service.createExerciseService({ userId: STUDENT_ID, data: baseCreate as never }),
+        service.createExerciseService({ userId: STUDENT_ID, data: baseCreate }),
       ).rejects.toThrow(new ConflictException(ERROR_MESSAGES.EXERCISE_ALREADY_SUBMITTED));
       expect(repo.create).not.toHaveBeenCalled();
     });
@@ -185,7 +191,7 @@ describe('ExerciseService', () => {
 
       await service.createExerciseService({
         userId: STUDENT_ID,
-        data: { ...baseCreate, sessionId: null } as never,
+        data: { ...baseCreate, sessionId: null },
       });
 
       expect(repo.findByStudentSession).not.toHaveBeenCalled();
@@ -196,7 +202,7 @@ describe('ExerciseService', () => {
       await expect(
         service.createExerciseService({
           userId: STUDENT_ID,
-          data: { ...baseCreate, sessionId: 'nope' } as never,
+          data: { ...baseCreate, sessionId: 'nope' },
         }),
       ).rejects.toThrow(new BadRequestException(`${ERROR_MESSAGES.ID_MUST_BE_UUID}: sessionId`));
     });
@@ -204,7 +210,7 @@ describe('ExerciseService', () => {
 
   describe('getExercisesService', () => {
     it('lists exercises scoped to the acting user', async () => {
-      repo.findAll.mockResolvedValue({ exercises: [], pagination: {} });
+      repo.findAll.mockResolvedValue({ data: [], pagination: {} });
 
       await service.getExercisesService({ userId: STUDENT_ID, query: { page: 1 } as never });
 
@@ -333,7 +339,7 @@ describe('ExerciseService', () => {
       await service.gradeExerciseService({
         userId: TUTOR_ID,
         id: EXERCISE_ID,
-        data: { score: 8.5, comment: 'tot' } as never,
+        data: { score: 8.5, comment: 'tot' },
       });
 
       const { data: patch } = repo.update.mock.calls[0][0];
@@ -354,7 +360,7 @@ describe('ExerciseService', () => {
         userId: TUTOR_ID,
         role: 'TUTOR',
         id: EXERCISE_ID,
-        data: { score: 8.5 } as never,
+        data: { score: 8.5 },
       });
 
       expect(notifier.notifyUsers).toHaveBeenCalledWith(
@@ -377,7 +383,7 @@ describe('ExerciseService', () => {
       await service.gradeExerciseService({
         userId: TUTOR_ID,
         id: EXERCISE_ID,
-        data: { score: 10 } as never,
+        data: { score: 10 },
       });
 
       expect(repo.update.mock.calls[0][0].data.comment).toBeNull();
@@ -394,7 +400,7 @@ describe('ExerciseService', () => {
         service.gradeExerciseService({
           userId: STUDENT_ID,
           id: EXERCISE_ID,
-          data: { score: 10 } as never,
+          data: { score: 10 },
         }),
       ).rejects.toThrow(new ForbiddenException(ERROR_MESSAGES.EXERCISE_GRADE_NOT_ALLOWED));
       expect(repo.update).not.toHaveBeenCalled();
@@ -407,7 +413,7 @@ describe('ExerciseService', () => {
         service.gradeExerciseService({
           userId: TUTOR_ID,
           id: EXERCISE_ID,
-          data: { score: 1 } as never,
+          data: { score: 1 },
         }),
       ).rejects.toThrow(NotFoundException);
     });
@@ -433,7 +439,7 @@ describe('ExerciseService', () => {
         userId: STUDENT_ID,
         role: 'STUDENT',
         id: EXERCISE_ID,
-        data: { exerciseUrls: [] } as never,
+        data: { exerciseUrls: [] },
       });
 
       const arg = notifier.notifyUsers.mock.calls[0][0];
@@ -459,7 +465,7 @@ describe('ExerciseService', () => {
         userId: STUDENT_ID,
         role: 'STUDENT',
         id: EXERCISE_ID,
-        data: { exerciseUrls: [] } as never,
+        data: { exerciseUrls: [] },
       });
       expect(notifier.notifyUsers.mock.calls[0][0].content).toContain('Một học sinh');
     });
@@ -472,7 +478,7 @@ describe('ExerciseService', () => {
           userId: STUDENT_ID,
           role: 'STUDENT',
           id: EXERCISE_ID,
-          data: { exerciseUrls: [] } as never,
+          data: { exerciseUrls: [] },
         }),
       ).rejects.toThrow(BadRequestException);
       expect(notifier.notifyUsers).not.toHaveBeenCalled();
@@ -485,7 +491,7 @@ describe('ExerciseService', () => {
         userId: OTHER_ID,
         role: 'ADMIN',
         id: EXERCISE_ID,
-        data: { exerciseUrls: [] } as never,
+        data: { exerciseUrls: [] },
       });
       expect(notifier.notifyUsers).not.toHaveBeenCalled();
     });
@@ -495,7 +501,7 @@ describe('ExerciseService', () => {
       await service.createExerciseService({
         userId: TUTOR_ID,
         role: 'TUTOR',
-        data: { ...baseCreate, sessionId: undefined } as never,
+        data: { ...baseCreate, sessionId: undefined },
       });
       expect(notifier.notifyUsers).not.toHaveBeenCalled();
     });
@@ -505,7 +511,7 @@ describe('ExerciseService', () => {
       await service.createExerciseService({
         userId: STUDENT_ID,
         role: 'STUDENT',
-        data: baseCreate as never,
+        data: baseCreate,
       });
       expect(notifier.notifyUsers).toHaveBeenCalledTimes(1);
 
@@ -514,7 +520,7 @@ describe('ExerciseService', () => {
       await service.createExerciseService({
         userId: STUDENT_ID,
         role: 'STUDENT',
-        data: baseCreate as never,
+        data: baseCreate,
       });
       expect(notifier.notifyUsers).toHaveBeenCalledTimes(2);
       expect(notifier.notifyUsers.mock.calls[1][0]).toMatchObject({
