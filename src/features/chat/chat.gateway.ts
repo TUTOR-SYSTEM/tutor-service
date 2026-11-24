@@ -8,6 +8,7 @@ import {
   ConnectedSocket,
   MessageBody,
 } from '@nestjs/websockets';
+import { Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -15,6 +16,7 @@ import { PrismaService } from '../../database/prisma.service';
 import { resolveJwtAccessSecret } from '../../packages/configs/jwt-sign.config';
 import { MessageService } from './message.service';
 import { ConversationService } from './conversation.service';
+import { RmqProducer } from '../rabbitmq/rmq.producer';
 import { resolveCorsOrigins } from '@packages/helpers/cors.helper';
 
 type AuthenticatedSocket = Socket & {
@@ -34,6 +36,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server!: Server;
 
+  private readonly logger = new Logger(ChatGateway.name);
+
+  private readonly sessionTimers = new Map<string, ReturnType<typeof setTimeout>>(); // socketId -> expiry timer
   private readonly onlineUsers = new Map<string, string>(); // userId -> socketId
 
   constructor(
@@ -42,7 +47,27 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly prisma: PrismaService,
     private readonly messageService: MessageService,
     private readonly conversationService: ConversationService,
+    private readonly rmqProducer: RmqProducer,
   ) {}
+
+  // same rules as JwtAuthGuard: access token carries a session id that must still be live in redis
+  private async isSessionLive(userId: string, sid: unknown): Promise<boolean> {
+    if (typeof sid !== 'string' || !sid) return false;
+    try {
+      const live = await this.rmqProducer.send<boolean, { key: string }>(
+        'redis.exists',
+        { key: `session:${userId}:${sid}` },
+        2000,
+        1,
+      );
+      return live === true;
+    } catch (error) {
+      // fail closed unless explicitly opted out, matching JwtAuthGuard
+      if (process.env.SESSION_CHECK_FAIL_OPEN === 'true') return true;
+      this.logger.warn(`WS session check unavailable: ${String(error)}`);
+      return false;
+    }
+  }
 
   async handleConnection(client: AuthenticatedSocket) {
     try {
@@ -68,11 +93,25 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const user = await this.prisma.user.findUnique({
         where: { id: userId },
-        select: { id: true },
+        select: { id: true, isActive: true },
       });
-      if (!user) {
+      if (!user || user.isActive === false) {
         client.disconnect();
         return;
+      }
+
+      if (!(await this.isSessionLive(userId, decoded.sid))) {
+        client.disconnect();
+        return;
+      }
+
+      // drop the socket when the access token expires so a long-lived connection can't outlive it
+      if (typeof decoded.exp === 'number') {
+        const ms = Math.max(decoded.exp * 1000 - Date.now(), 0);
+        this.sessionTimers.set(
+          client.id,
+          setTimeout(() => client.disconnect(), Math.min(ms, 2_147_483_647)),
+        );
       }
 
       client.userId = userId;
@@ -91,6 +130,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   handleDisconnect(client: AuthenticatedSocket) {
+    const timer = this.sessionTimers.get(client.id);
+    if (timer) {
+      clearTimeout(timer);
+      this.sessionTimers.delete(client.id);
+    }
     if (client.userId) {
       this.onlineUsers.delete(client.userId);
       this.server.emit('user:status', { userId: client.userId, status: 'offline' });

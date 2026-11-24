@@ -34,6 +34,16 @@ export class ExerciseService {
     private readonly notifier: NotificationNotifier,
   ) {}
 
+  // answer keys are only visible to the tutor/admin until graded; a student who is asked to
+  // resubmit must not read the key of the attempt they are about to redo
+  private hideAnswerKey<T extends { tutorId: string; status: string; answerKeyUrls: unknown[] }>(
+    item: T,
+    { userId, role }: { userId: string; role?: string | null },
+  ): T {
+    if (isAdminRole(role) || item.tutorId === userId || item.status === 'GRADED') return item;
+    return { ...item, answerKeyUrls: [] };
+  }
+
   private assertUuid(value: string | null | undefined, label: string) {
     if (!value || !checkUuidValid({ data: value })) {
       throw new BadRequestException(`${ERROR_MESSAGES.ID_MUST_BE_UUID}: ${label}`);
@@ -226,7 +236,7 @@ export class ExerciseService {
           });
           if (!submitted) throw new BadRequestException(ERROR_MESSAGES.EXERCISE_ALREADY_GRADED);
           await this.notifyTutorOfSubmission({ userId, role, exercise: submitted });
-          return submitted;
+          return this.hideAnswerKey(submitted, { userId, role });
         }
         if (existing.status === 'RESUBMIT') {
           throw new ConflictException(ERROR_MESSAGES.EXERCISE_RESUBMIT_REQUIRED);
@@ -237,7 +247,7 @@ export class ExerciseService {
 
     const created = await this.repo.create({ data: { ...data, status: 'SUBMITTED' } });
     await this.notifyTutorOfSubmission({ userId, role, exercise: created });
-    return created;
+    return this.hideAnswerKey(created, { userId, role });
   }
 
   async getExercisesService({
@@ -250,7 +260,11 @@ export class ExerciseService {
     query: getExerciseDto;
   }) {
     this.assertUuid(userId, 'User Id');
-    return this.repo.findAll({ userId, role, query });
+    const result = await this.repo.findAll({ userId, role, query });
+    return {
+      ...result,
+      data: result.data.map((item) => this.hideAnswerKey(item, { userId, role })),
+    };
   }
 
   async getExerciseService({
@@ -274,7 +288,7 @@ export class ExerciseService {
     if (!isAdminRole(role) && !isOwnerOrParty && !isChildParent) {
       throw new NotFoundException(ERROR_MESSAGES.EXERCISE_NOT_FOUND);
     }
-    return found;
+    return this.hideAnswerKey(found, { userId, role });
   }
 
   // student re-submits their own work (only while it has not been graded)
@@ -309,7 +323,7 @@ export class ExerciseService {
     });
     if (!updated) throw new BadRequestException(ERROR_MESSAGES.EXERCISE_ALREADY_GRADED);
     await this.notifyTutorOfSubmission({ userId, role, exercise: updated });
-    return updated;
+    return this.hideAnswerKey(updated, { userId, role });
   }
 
   // tutor asks the student to submit again (status -> RESUBMIT, files are kept)

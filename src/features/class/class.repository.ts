@@ -281,12 +281,47 @@ export class ClassRepository {
   // enroll one or many students into a class; duplicates (already enrolled) are skipped
   // via the (class_id, student_id) unique index and simply not returned.
   /** Thêm học sinh vào lớp và gán gia sư lớp cho họ, trong cùng một transaction. */
-  /** Removes one student from a class; returns how many enrollment rows were deleted (0 or 1). */
-  async removeStudent({ classId, studentId }: { classId: string; studentId: string }) {
-    const { count } = await this.prisma.classStudent.deleteMany({
-      where: { classId, studentId },
+  /**
+   * Removes one student from a class; returns how many enrollment rows were deleted (0 or 1).
+   * When this was the student's last class of that tutor, in the same transaction the parent is released: the student's `parentId` is cleared and,
+   * unless the parent still has another child linked to this tutor, the parent's `tutorId` is cleared.
+   */
+  async removeStudent({
+    classId,
+    studentId,
+    tutorId,
+  }: {
+    classId: string;
+    studentId: string;
+    tutorId: string;
+  }) {
+    return this.prisma.$transaction(async (tx) => {
+      const { count } = await tx.classStudent.deleteMany({ where: { classId, studentId } });
+      if (count === 0) return 0;
+
+      // Still enrolled in another class of this tutor: the student (and so the parent) stays managed.
+      const stillEnrolled = await tx.classStudent.count({
+        where: { studentId, class: { tutorId } },
+      });
+      if (stillEnrolled > 0) return count;
+
+      const student = await tx.user.findUnique({
+        where: { id: studentId },
+        select: { parentId: true },
+      });
+      const parentId = student?.parentId;
+      if (!parentId) return count;
+
+      await tx.user.updateMany({ where: { id: studentId }, data: { parentId: null } });
+      const stillManaged = await tx.user.count({ where: { parentId, tutorId } });
+      if (stillManaged === 0) {
+        await tx.user.updateMany({
+          where: { id: parentId, role: 'PARENT', tutorId },
+          data: { tutorId: null },
+        });
+      }
+      return count;
     });
-    return count;
   }
 
   async addStudents({

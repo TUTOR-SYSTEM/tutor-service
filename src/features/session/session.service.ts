@@ -366,6 +366,8 @@ export class SessionService {
       sessionNumber: data.sessionNumber ?? current.sessionNumber,
       exerciseUrls: data.exerciseUrls ?? current.exerciseUrls,
       exerciseDueAt: data.exerciseDueAt ?? current.exerciseDueAt,
+      // Hạn nộp hiển thị trên UI là endAt của buổi khi chưa đặt exerciseDueAt riêng.
+      endAt: data.endAt ?? current.endAt,
     };
     const newStudentIds =
       data.status === 'COMPLETED' && current.status !== 'COMPLETED'
@@ -476,12 +478,14 @@ export class SessionService {
       title: string | null;
       sessionNumber: number;
       exerciseDueAt: Date | string | null;
+      endAt?: Date | string | null;
     },
     studentIds: string[],
   ) {
     if (!session.tutorId) return;
     // exerciseDueAt có thể đến dưới dạng chuỗi ISO (RPC) nên luôn parse lại
-    const dueAt = session.exerciseDueAt ? new Date(session.exerciseDueAt) : null;
+    const dueSource = session.exerciseDueAt ?? session.endAt ?? null;
+    const dueAt = dueSource ? new Date(dueSource) : null;
     const due =
       dueAt && !Number.isNaN(dueAt.getTime())
         ? `Hạn nộp: ${dueAt.toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}`

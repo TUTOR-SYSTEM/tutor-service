@@ -6,7 +6,7 @@ import type {
   ExerciseDetailDto,
   getExerciseDto,
 } from '@packages/entities/exercise';
-import { buildPagination } from '@packages/helpers';
+import { buildPagination, isAdminRole } from '@packages/helpers';
 
 type ExerciseUpdate = Partial<{
   exerciseUrls: Prisma.InputJsonValue;
@@ -145,6 +145,7 @@ export class ExerciseRepository {
   // narrowed by the optional query filters.
   async findAll({
     userId,
+    role,
     query,
   }: {
     userId: string;
@@ -153,12 +154,15 @@ export class ExerciseRepository {
   }) {
     const { page, limit, sessionId, studentId, classId, tutorId } = query;
 
+    // ADMIN xem được mọi bài (chỉ đọc); các vai trò khác chỉ thấy bài liên quan tới mình.
     // tutor (owner), the student on the row, or the PARENT of that student (student.parentId)
-    const conditions: Prisma.ExerciseWhereInput[] = [
-      {
-        OR: [{ tutorId: userId }, { studentId: userId }, { student: { parentId: userId } }],
-      },
-    ];
+    const conditions: Prisma.ExerciseWhereInput[] = isAdminRole(role)
+      ? []
+      : [
+          {
+            OR: [{ tutorId: userId }, { studentId: userId }, { student: { parentId: userId } }],
+          },
+        ];
     if (sessionId) conditions.push({ sessionId });
     if (studentId) conditions.push({ studentId });
     if (tutorId) conditions.push({ tutorId });
