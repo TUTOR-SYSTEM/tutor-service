@@ -36,6 +36,13 @@ this is now an education / tutoring domain.)
   that session's class tutor (otherwise a student could name themselves tutor and self-grade).
 - **Chat WebSocket**: `conversation:join` and `message:read` check `conversation_participants`;
   `typing:*` only works for sockets that already joined the room.
+- **Chat socket auth**: `ChatGateway.handleConnection` must mirror `JwtAuthGuard`: user exists and
+  `isActive !== false`, the token's `sid` is live in redis (`redis.exists` via `RmqProducer`, fail
+  closed unless `SESSION_CHECK_FAIL_OPEN=true`), and the socket is disconnected when the token's
+  `exp` passes.
+- **Exercise answer key**: `answerKeyUrls` is hidden (`ExerciseService.hideAnswerKey`) from anyone but
+  the exercise's tutor/ADMIN until status is `GRADED`. Apply it to every service method that
+  returns an exercise to a student/parent.
 - **Chat membership**: `addParticipant` refuses DIRECT conversations (`CHAT_DIRECT_NO_ADD_PARTICIPANT`)
   and runs `assertCanChatWithAll` on the new member, the same policy as DM and group create.
   `ADMIN` may chat with anyone; `TUTOR` needs a class link to students/parents.
