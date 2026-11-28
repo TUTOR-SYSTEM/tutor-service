@@ -60,6 +60,8 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
 # docker compose env (real secrets)
 docker.env
+.env.compose
+.env.compose.example
 
 # Jev router skill dependencies
 .claude/skills/*/node_modules/

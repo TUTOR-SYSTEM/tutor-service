@@ -79,7 +79,7 @@ export class ExerciseRepository {
    * - buổi học: gia sư của lớp, học sinh đang học lớp, phụ huynh của học sinh đó;
    * - bài tập (đề, bài nộp, đáp án): gia sư chấm, học sinh làm bài, phụ huynh của học sinh;
    * - bài giảng (lesson): mọi TUTOR.
-   * Dùng `position(key in cột::text)` thay LIKE để key không bị hiểu như wildcard.
+   * So khớp đúng phần tử JSON: `cột @> [{"key": <key>}]` (containment), không tìm chuỗi con — `position` / LIKE trên text JSON khớp nhầm key ngắn nằm trong key khác.
    */
   async canAccessFile({
     key,
@@ -96,7 +96,8 @@ export class ExerciseRepository {
         EXISTS (
           SELECT 1 FROM class_sessions s
           JOIN classes c ON c.id = s.class_id
-          WHERE (position(${key} in s.theory_urls::text) > 0 OR position(${key} in s.exercise_urls::text) > 0)
+          WHERE (s.theory_urls @> jsonb_build_array(jsonb_build_object('key', ${key}::text))
+              OR s.exercise_urls @> jsonb_build_array(jsonb_build_object('key', ${key}::text)))
             AND (
               c.tutor_id = ${userId}::uuid
               OR EXISTS (
@@ -110,14 +111,15 @@ export class ExerciseRepository {
         OR EXISTS (
           SELECT 1 FROM exercises e
           JOIN users st ON st.id = e.student_id
-          WHERE (position(${key} in e.issue_urls::text) > 0 OR position(${key} in e.exercise_urls::text) > 0)
+          WHERE (e.issue_urls @> jsonb_build_array(jsonb_build_object('key', ${key}::text))
+              OR e.exercise_urls @> jsonb_build_array(jsonb_build_object('key', ${key}::text)))
             AND (e.tutor_id = ${userId}::uuid OR e.student_id = ${userId}::uuid OR st.parent_id = ${userId}::uuid)
         )
         -- đáp án: gia sư luôn xem; học sinh/phụ huynh chỉ xem sau khi bài đã được chấm
         OR EXISTS (
           SELECT 1 FROM exercises e
           JOIN users st ON st.id = e.student_id
-          WHERE position(${key} in e.answer_key_urls::text) > 0
+          WHERE e.answer_key_urls @> jsonb_build_array(jsonb_build_object('key', ${key}::text))
             AND (
               e.tutor_id = ${userId}::uuid
               OR (e.status = 'GRADED' AND (e.student_id = ${userId}::uuid OR st.parent_id = ${userId}::uuid))
@@ -127,12 +129,21 @@ export class ExerciseRepository {
           ${role ?? ''} = 'TUTOR'
           AND EXISTS (
             SELECT 1 FROM lessons l
-            WHERE position(${key} in l.theory_urls::text) > 0 OR position(${key} in l.exercise_urls::text) > 0
+            WHERE l.theory_urls @> jsonb_build_array(jsonb_build_object('key', ${key}::text))
+               OR l.exercise_urls @> jsonb_build_array(jsonb_build_object('key', ${key}::text))
           )
         )
       ) AS ok
     `;
     return rows[0]?.ok === true;
+  }
+
+  /** True when `tutorId` teaches (owns) at least one class the student is enrolled in. */
+  async isTutorOfStudentClass({ tutorId, studentId }: { tutorId: string; studentId: string }) {
+    const count = await this.prisma.classStudent.count({
+      where: { studentId, class: { tutorId } },
+    });
+    return count > 0;
   }
 
   /** True when `parentId` is the PARENT of `studentId` (student.parentId). */

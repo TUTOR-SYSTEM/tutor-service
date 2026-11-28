@@ -23,6 +23,20 @@ import {
   TUTOR_SERVICE,
   USER_SERVICE,
 } from './rmq.constants';
+import { sealRpcIdentity } from '@packages/helpers/rpc-identity.helper';
+
+/**
+ * Seals a user/role-bearing message for every non-user queue (see rpc-identity.helper.ts). The
+ * user-service keeps its own actor signature, so it is skipped here.
+ */
+function sealForTarget<T>(message: T, pattern: string): T {
+  if (resolveRmqTarget(pattern) === USER_SERVICE) return message;
+  const secret = process.env.RPC_ACTOR_SECRET?.trim();
+  if (!secret) {
+    throw new Error('RPC_ACTOR_SECRET must be set to forward a user identity to tutor/third');
+  }
+  return sealRpcIdentity(message, pattern, secret);
+}
 
 const SERVICE_NAME = 'tutor-service';
 
@@ -65,7 +79,7 @@ function toRpcErrorPayload(raw: unknown): RpcErrorPayload {
   return { statusCode: HttpStatus.INTERNAL_SERVER_ERROR, message };
 }
 
-/** Lets tutor-service call out to another service — currently just `log.create` (fire-and-forget) to third-service. */
+/** Lets tutor-service call out to another service — e.g. `notification.create` on third-service. */
 @Injectable()
 export class RmqProducer implements OnModuleDestroy {
   private readonly logger = new Logger(RmqProducer.name);
@@ -93,7 +107,7 @@ export class RmqProducer implements OnModuleDestroy {
 
   emit<TResult = unknown, TInput = unknown>(pattern: string, message: TInput): Promise<TResult> {
     const client = this.clients[resolveRmqTarget(pattern)];
-    const { record, headers } = withTraceHeaders(message);
+    const { record, headers } = withTraceHeaders(sealForTarget(message, pattern));
     this.logger.log(
       `[EMIT] ${pattern} correlationId=${headers[CORRELATION_ID_HEADER]} traceId=${headers[TRACE_ID_HEADER]}`,
     );
@@ -113,7 +127,7 @@ export class RmqProducer implements OnModuleDestroy {
     maxRetries: number = 2,
   ): Promise<TResponse> {
     const client = this.clients[resolveRmqTarget(pattern)];
-    const { record, headers } = withTraceHeaders(message);
+    const { record, headers } = withTraceHeaders(sealForTarget(message, pattern));
     const correlationId = headers[CORRELATION_ID_HEADER];
     const traceId = headers[TRACE_ID_HEADER];
     const finalTimeoutMs = timeoutMs ?? 10000;

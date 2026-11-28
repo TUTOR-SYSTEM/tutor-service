@@ -47,9 +47,28 @@ describe('ErrorInterceptor — database errors', () => {
     expect(error.message).toBe('Database error');
   });
 
-  it('passes ordinary error messages through', async () => {
+  it('replaces ordinary error messages with a generic message', async () => {
     const error = await intercept(new Error('plain failure'));
 
-    expect(error.message).toBe('plain failure');
+    expect(error.message).toBe('Internal server error');
+  });
+
+  it('never forwards file paths or raw internal detail', async () => {
+    const error = await intercept(new Error('ENOENT: no such file /var/app/secrets.json'));
+
+    expect(error.message).toBe('Internal server error');
+  });
+
+  it('gives non-Error throws the generic message', async () => {
+    const error = await intercept('raw thrown string');
+
+    expect(error.message).toBe('Internal server error');
+  });
+
+  it('maps a Prisma-named error without a known code to Database error', async () => {
+    const error = new Error('unexpected');
+    error.name = 'PrismaClientUnknownRequestError';
+
+    expect((await intercept(error)).message).toBe('Database error');
   });
 });

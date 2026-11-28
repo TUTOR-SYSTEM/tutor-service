@@ -3,9 +3,10 @@
 - **Imports**: use the `@packages/*` alias for anything under `src/packages/`
   (e.g. `import { Public } from '@packages/decorators'`) — never long relative `../../..` paths.
 - **Validation**: every request body/query is validated with a **Zod v4** schema via
-  `new ZodValidationPipe<Dto>(schema)`. DTOs are `z.infer<>` types, never hand-written interfaces.
+  `new ZodValidationPipe<Dto>(schema)`. RMQ `.rpc.controller.ts` handlers use the same schemas through
+  `parseRpcPayload` (see `nestjs-feature-pattern.md`). DTOs are `z.infer<>` types, never hand-written interfaces.
   Pagination query schemas use plain `z.coerce.number()` fields (`page`/`limit`), not `z.preprocess`.
-- **Secrets**: never read, print, or edit `.env*` files (a PreToolUse hook blocks edits).
+- **Secrets**: `.env*` files may be read and edited (no hook gate; user decision 2026-11-28). Never print secret values into chat or commit them. Reference config via `process.env` / `ConfigModule`.
   Reference config via `process.env` / `ConfigModule`.
 - **Style**: single quotes, trailing commas, 100-char width, semicolons. Formatting/lint is
   auto-applied by a PostToolUse hook, so match surrounding code and let the hook normalize it.

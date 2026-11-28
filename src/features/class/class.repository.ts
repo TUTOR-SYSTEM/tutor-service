@@ -111,18 +111,6 @@ export class ClassRepository {
             skipDuplicates: true,
           });
         }
-        // Gia sư học sinh luôn theo gia sư lớp: đồng bộ khi đổi gia sư lớp hoặc roster.
-        if (studentIds || data.tutorId !== undefined) {
-          const roster = studentIds
-            ? studentIds
-            : (
-                await tx.classStudent.findMany({
-                  where: { classId: id },
-                  select: { studentId: true },
-                })
-              ).map((row) => row.studentId);
-          await this.syncStudentsTutor(tx, roster, updated.tutorId);
-        }
         return updated;
       });
     } catch (error) {
@@ -155,19 +143,6 @@ export class ClassRepository {
       distinct: ['studentId'],
     });
     return rows.map((row) => row.studentId);
-  }
-
-  /** Gán gia sư quản lý cho các học sinh (chỉ role STUDENT). */
-  private async syncStudentsTutor(
-    tx: Prisma.TransactionClient,
-    studentIds: string[],
-    tutorId: string,
-  ) {
-    if (studentIds.length === 0) return;
-    await tx.user.updateMany({
-      where: { id: { in: studentIds }, role: 'STUDENT' },
-      data: { tutorId },
-    });
   }
 
   /** Thông tin công khai của gia sư (không lộ email/SĐT) — học sinh/phụ huynh xem được. */
@@ -281,66 +256,19 @@ export class ClassRepository {
   // enroll one or many students into a class; duplicates (already enrolled) are skipped
   // via the (class_id, student_id) unique index and simply not returned.
   /** Thêm học sinh vào lớp và gán gia sư lớp cho họ, trong cùng một transaction. */
-  /**
-   * Removes one student from a class; returns how many enrollment rows were deleted (0 or 1).
-   * When this was the student's last class of that tutor, in the same transaction the parent is released: the student's `parentId` is cleared and,
-   * unless the parent still has another child linked to this tutor, the parent's `tutorId` is cleared.
-   */
-  async removeStudent({
-    classId,
-    studentId,
-    tutorId,
-  }: {
-    classId: string;
-    studentId: string;
-    tutorId: string;
-  }) {
-    return this.prisma.$transaction(async (tx) => {
-      const { count } = await tx.classStudent.deleteMany({ where: { classId, studentId } });
-      if (count === 0) return 0;
-
-      // Still enrolled in another class of this tutor: the student (and so the parent) stays managed.
-      const stillEnrolled = await tx.classStudent.count({
-        where: { studentId, class: { tutorId } },
-      });
-      if (stillEnrolled > 0) return count;
-
-      const student = await tx.user.findUnique({
-        where: { id: studentId },
-        select: { parentId: true },
-      });
-      const parentId = student?.parentId;
-      if (!parentId) return count;
-
-      await tx.user.updateMany({ where: { id: studentId }, data: { parentId: null } });
-      const stillManaged = await tx.user.count({ where: { parentId, tutorId } });
-      if (stillManaged === 0) {
-        await tx.user.updateMany({
-          where: { id: parentId, role: 'PARENT', tutorId },
-          data: { tutorId: null },
-        });
-      }
-      return count;
-    });
+  /** Removes one student's enrollment in a class; returns how many rows were deleted (0 or 1). */
+  async removeStudent({ classId, studentId }: { classId: string; studentId: string }) {
+    const { count } = await this.prisma.classStudent.deleteMany({ where: { classId, studentId } });
+    return count;
   }
 
-  async addStudents({
-    classId,
-    studentIds,
-    tutorId,
-  }: {
-    classId: string;
-    studentIds: string[];
-    tutorId: string;
-  }) {
+  // enroll one or many students; duplicates (already enrolled) are skipped via the (class_id, student_id)
+  // unique index and not returned. The tutor/parent link is set by user-service (see UserLinkClient).
+  async addStudents({ classId, studentIds }: { classId: string; studentIds: string[] }) {
     if (studentIds.length === 0) return [];
-    return this.prisma.$transaction(async (tx) => {
-      const inserted = await tx.classStudent.createManyAndReturn({
-        data: studentIds.map((studentId) => ({ classId, studentId })),
-        skipDuplicates: true,
-      });
-      await this.syncStudentsTutor(tx, studentIds, tutorId);
-      return inserted;
+    return this.prisma.classStudent.createManyAndReturn({
+      data: studentIds.map((studentId) => ({ classId, studentId })),
+      skipDuplicates: true,
     });
   }
 

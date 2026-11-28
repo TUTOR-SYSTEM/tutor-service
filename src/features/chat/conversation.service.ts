@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/commo
 import { Prisma } from '@prisma/client';
 import { PrismaService, uuidList } from '../../database/prisma.service';
 import { ERROR_MESSAGES } from 'src/data/constants';
+import { canActOnOwned } from '@packages/helpers/actor.helper';
 
 type UserRole = 'STUDENT' | 'ADMIN' | 'TUTOR' | 'PARENT';
 
@@ -185,11 +186,10 @@ export class ConversationService {
   }
 
   async createGroupConversation(userId: string, name: string, participantIds: string[]) {
-    const allIds = [userId, ...participantIds.filter((id) => id !== userId)];
-    await this.assertCanChatWithAll(
-      userId,
-      allIds.filter((id) => id !== userId),
-    );
+    // dedupe first: a repeated id would violate the (conversationId, userId) unique key (409)
+    const others = [...new Set(participantIds)].filter((id) => id !== userId);
+    await this.assertCanChatWithAll(userId, others);
+    const allIds = [userId, ...others];
 
     const newConv = await this.prisma.conversation.create({
       data: { type: 'GROUP', name, createdBy: userId },
@@ -202,10 +202,15 @@ export class ConversationService {
     return this.getConversationById(newConv.id, userId);
   }
 
-  async createClassConversation(userId: string, classId: string) {
+  // Only ADMIN or the class's own tutor may open its chat. A missing class and a class the caller
+  // may not act on get the same 404, so the response does not reveal which class ids exist.
+  async createClassConversation(userId: string, classId: string, role?: string | null) {
     const classData = await this.prisma.class.findUnique({ where: { id: classId } });
 
-    if (!classData) {
+    const isAdmin = role === 'ADMIN';
+    const isOwnTutor =
+      role === 'TUTOR' && !!classData && canActOnOwned({ userId, role }, classData.tutorId);
+    if (!classData || !(isAdmin || isOwnTutor)) {
       throw new NotFoundException('Class not found');
     }
 
@@ -411,8 +416,6 @@ export class ConversationService {
   }
 
   private async checkTutorStudentAccess(tutorId: string, studentOrParentId: string) {
-    let studentId = studentOrParentId;
-
     const targetUser = await this.prisma.user.findUnique({
       where: { id: studentOrParentId },
       select: { role: true },
@@ -420,18 +423,14 @@ export class ConversationService {
 
     if (!targetUser) return false;
 
-    if (targetUser.role === 'PARENT') {
-      const child = await this.prisma.user.findFirst({
-        where: { parentId: studentOrParentId },
-        select: { id: true },
-      });
-
-      if (!child) return false;
-      studentId = child.id;
-    }
+    // a parent qualifies when ANY child is enrolled in one of this tutor's classes
+    const where =
+      targetUser.role === 'PARENT'
+        ? { student: { parentId: studentOrParentId }, class: { tutorId } }
+        : { studentId: studentOrParentId, class: { tutorId } };
 
     const enrollment = await this.prisma.classStudent.findFirst({
-      where: { studentId, class: { tutorId } },
+      where,
       select: { id: true },
     });
 

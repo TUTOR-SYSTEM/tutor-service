@@ -175,8 +175,8 @@ export class SessionService {
     const session = await this.repo.getById({ id });
     if (!session) throw new NotFoundException(ERROR_MESSAGES.SESSION_NOT_FOUND);
 
-    await this.assertClassOwner({ userId, role, classId: session.classId });
-    return session;
+    const classData = await this.assertClassOwner({ userId, role, classId: session.classId });
+    return { session, classData };
   }
 
   async createSessionService({
@@ -352,16 +352,25 @@ export class SessionService {
     id: string;
     data: UpdateSessionDto;
   }) {
-    const current = await this.loadOwnedSession({ userId, role, id });
-    // Buổi vừa chuyển sang COMPLETED: giao bài tập trước, rồi mới lưu trạng thái. Nếu giao lỗi
-    // thì buổi vẫn chưa COMPLETED và có thể bấm kết thúc lại (giao bài là idempotent).
-    // Thông báo học sinh chỉ gửi SAU khi lưu thành công, để không báo "có bài tập" cho buổi
-    // vẫn chưa COMPLETED.
+    const { session: current, classData } = await this.loadOwnedSession({ userId, role, id });
+    const completing = data.status === 'COMPLETED' && current.status !== 'COMPLETED';
+
+    // Every check runs (reads only) BEFORE the first write: time bounds, sessionNumber, the
+    // session tutor, and the homework roster. Completing the session then writes the status and
+    // the homework rows in ONE transaction, so a failed assignment leaves the session un-completed
+    // and "complete" can be retried (assignment is idempotent).
+    const next = await this.prepareSessionUpdate({
+      userId,
+      id,
+      data,
+      current,
+      classTutorId: classData.tutorId,
+    });
     const homework = {
       role,
       id,
       classId: current.classId,
-      tutorId: data.tutorId ?? current.tutorId,
+      tutorId: next.tutorId,
       title: data.title ?? current.title,
       sessionNumber: data.sessionNumber ?? current.sessionNumber,
       exerciseUrls: data.exerciseUrls ?? current.exerciseUrls,
@@ -369,12 +378,20 @@ export class SessionService {
       // Hạn nộp hiển thị trên UI là endAt của buổi khi chưa đặt exerciseDueAt riêng.
       endAt: data.endAt ?? current.endAt,
     };
-    const newStudentIds =
-      data.status === 'COMPLETED' && current.status !== 'COMPLETED'
-        ? await this.assignHomeworkOnComplete(homework)
-        : [];
-    const updated = await this.applySessionUpdate({ userId, id, data, current });
-    if (newStudentIds.length > 0) {
+    const newStudentIds = completing ? await this.planHomework(homework) : [];
+
+    const updated = completing
+      ? await this.repo.updateWithHomework({
+          id,
+          data: next.data,
+          homework:
+            newStudentIds.length > 0 && next.tutorId
+              ? { tutorId: next.tutorId, studentIds: newStudentIds }
+              : null,
+        })
+      : await this.repo.update({ id, data: next.data });
+    // notify only after the commit: students must not hear about homework of an un-completed session
+    if (updated && newStudentIds.length > 0) {
       await this.notifyHomeworkAssigned(homework, newStudentIds);
     }
     await this.notifySessionChange({ userId, role, data, current });
@@ -440,8 +457,8 @@ export class SessionService {
     });
   }
 
-  /** Giao bài tập của buổi cho mọi học sinh trong lớp (idempotent). Trả về id học sinh mới được giao. */
-  private async assignHomeworkOnComplete(session: {
+  /** Reads only: roster students who have no exercise row for this session yet. */
+  private async planHomework(session: {
     /** Vai trò người kết thúc buổi — gateway/notification kiểm quyền theo role này. */
     role?: string | null;
     id: string;
@@ -451,21 +468,13 @@ export class SessionService {
     sessionNumber: number;
     exerciseUrls: unknown;
     exerciseDueAt: Date | string | null;
-  }) {
+  }): Promise<string[]> {
     if (!Array.isArray(session.exerciseUrls) || session.exerciseUrls.length === 0) return [];
     if (!session.tutorId) return [];
 
     const roster = await this.classService.getRosterStudentIdsService({ classId: session.classId });
     const already = new Set(await this.repo.findExerciseStudentIds({ sessionId: session.id }));
-    const newStudentIds = roster.filter((studentId) => !already.has(studentId));
-    if (newStudentIds.length === 0) return [];
-
-    await this.repo.createAssignedExercises({
-      sessionId: session.id,
-      tutorId: session.tutorId,
-      studentIds: newStudentIds,
-    });
-    return newStudentIds;
+    return roster.filter((studentId) => !already.has(studentId));
   }
 
   /** Gửi thông báo "bài tập mới" cho các học sinh vừa được giao (gọi sau khi buổi đã lưu). */
@@ -504,11 +513,13 @@ export class SessionService {
     });
   }
 
-  private async applySessionUpdate({
+  // reads only: validates every field the update changes and returns the payload to write
+  private async prepareSessionUpdate({
     userId,
     id,
     data,
     current,
+    classTutorId,
   }: {
     userId: string;
     id: string;
@@ -522,7 +533,8 @@ export class SessionService {
       endAt: Date;
       status: string;
     };
-  }) {
+    classTutorId: string;
+  }): Promise<{ data: UpdateSessionDto; tutorId: string | null }> {
     // partial update: check the new bounds against the stored ones
     this.assertSessionTimeRange(data.startAt ?? current.startAt, data.endAt ?? current.endAt);
 
@@ -533,16 +545,25 @@ export class SessionService {
         excludeId: id,
       });
 
-    // re-validate changed FKs exactly as create does
+    if (data.tutorId !== undefined && data.tutorId !== current.tutorId) {
+      // the session tutor is the class tutor: grading and homework authority follow this id
+      if (data.tutorId !== classTutorId)
+        throw new NotFoundException(ERROR_MESSAGES.TUTOR_NOT_FOUND);
+      // once a student has submitted work on this session, its tutor must not move
+      if (await this.repo.hasSubmittedExercises({ sessionId: id }))
+        throw new ConflictException(ERROR_MESSAGES.SESSION_TUTOR_LOCKED);
+    }
+
+    // re-validate changed FKs exactly as create does (role must be TUTOR/ADMIN)
     if (data.lessonId !== undefined || data.tutorId !== undefined) {
       const refs = await this.resolveSessionRefs({
         defaultTutorId: current.tutorId ?? userId,
         lessonId: data.lessonId !== undefined ? data.lessonId : current.lessonId,
         tutorId: data.tutorId,
       });
-      return this.repo.update({ id, data: { ...data, ...refs } });
+      return { data: { ...data, ...refs }, tutorId: refs.tutorId };
     }
-    return this.repo.update({ id, data });
+    return { data, tutorId: current.tutorId };
   }
 
   async delSessionService({

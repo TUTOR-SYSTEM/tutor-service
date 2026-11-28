@@ -128,12 +128,14 @@ describe('MessageService', () => {
     it('returns the updated row for DELIVERED and READ', async () => {
       prisma.message.update.mockResolvedValue({ id: MESSAGE_ID, status: 'READ' });
 
-      await expect(service.updateMessageStatus(MESSAGE_ID, 'READ')).resolves.toEqual({
+      await expect(
+        service.updateMessageStatus(MESSAGE_ID, 'READ', CONVERSATION_ID),
+      ).resolves.toEqual({
         id: MESSAGE_ID,
         status: 'READ',
       });
       expect(prisma.message.update).toHaveBeenCalledWith({
-        where: { id: MESSAGE_ID },
+        where: { id: MESSAGE_ID, conversationId: CONVERSATION_ID },
         data: { status: 'READ' },
       });
     });
@@ -141,13 +143,30 @@ describe('MessageService', () => {
     it('returns undefined when the message does not exist', async () => {
       prisma.message.update.mockRejectedValue(notFound());
 
-      await expect(service.updateMessageStatus(MESSAGE_ID, 'DELIVERED')).resolves.toBeUndefined();
+      await expect(
+        service.updateMessageStatus(MESSAGE_ID, 'DELIVERED', CONVERSATION_ID),
+      ).resolves.toBeUndefined();
     });
 
     it('rethrows unexpected errors', async () => {
       prisma.message.update.mockRejectedValue(new Error('boom'));
 
-      await expect(service.updateMessageStatus(MESSAGE_ID, 'READ')).rejects.toThrow('boom');
+      await expect(
+        service.updateMessageStatus(MESSAGE_ID, 'READ', CONVERSATION_ID),
+      ).rejects.toThrow('boom');
+    });
+  });
+
+  describe('updateMessageStatus scope (TS-11)', () => {
+    it('matches on both the message id and its conversation id', async () => {
+      prisma.message.update.mockResolvedValue({ id: MESSAGE_ID, status: 'READ' });
+
+      await service.updateMessageStatus(MESSAGE_ID, 'READ', CONVERSATION_ID);
+
+      expect(prisma.message.update).toHaveBeenCalledWith({
+        where: { id: MESSAGE_ID, conversationId: CONVERSATION_ID },
+        data: { status: 'READ' },
+      });
     });
   });
 

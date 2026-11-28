@@ -9,6 +9,15 @@ import {
 } from '@nestjs/common';
 import { catchError, Observable, throwError } from 'rxjs';
 
+function isPrismaError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return (
+    error.name.startsWith('Prisma') ||
+    error.message.startsWith('Failed query:') ||
+    error.message.includes('`prisma.')
+  );
+}
+
 @Injectable()
 export class ErrorInterceptor implements NestInterceptor {
   private readonly logger = new Logger(ErrorInterceptor.name);
@@ -32,11 +41,10 @@ export class ErrorInterceptor implements NestInterceptor {
           return 'Value violates check constraint';
       }
     }
-    const message = error instanceof Error ? error.message : 'Internal server error';
     // Prisma messages embed the failing invocation (model, arguments) — never send them out
-    return message.startsWith('Failed query:') || message.includes('`prisma.')
-      ? 'Database error'
-      : message;
+    if (isPrismaError(error)) return 'Database error';
+    // Anything else may carry internal detail (file paths, SQL, upstream payloads): generic text
+    return 'Internal server error';
   }
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {

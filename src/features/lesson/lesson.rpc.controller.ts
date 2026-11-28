@@ -1,52 +1,54 @@
 import { Controller } from '@nestjs/common';
 import { MessagePattern, Payload } from '@nestjs/microservices';
-import type {
-  CreateLessonBodyDto,
-  GetLessonsQueryDto,
-  UpdateLessonDto,
-} from '@packages/entities/curriculum';
+import {
+  lessonCreatePayloadSchema,
+  lessonDeletePayloadSchema,
+  lessonGetAllPayloadSchema,
+  lessonIdPayloadSchema,
+  lessonUpdatePayloadSchema,
+} from '@packages/entities/rpc';
+import { parseRpcPayload } from '@packages/pipes';
 import { LessonService } from './lesson.service';
 
 /**
  * Message-pattern mirror of `LessonController` — reached only by the gateway's `TUTOR_SERVICE`
- * `ClientProxy` over RabbitMQ. Delegates to the same, unmodified
- * `LessonService` the HTTP controller uses; no business logic lives here.
+ * `ClientProxy` over RabbitMQ. Validates the payload (`rpc-payload.schema.ts`) and delegates to
+ * the same, unmodified `LessonService` the HTTP controller uses; no business logic lives here.
  */
 @Controller()
 export class LessonRpcController {
   constructor(private readonly lessonService: LessonService) {}
 
   @MessagePattern('lesson.create')
-  create(
-    @Payload()
-    payload: {
-      userId: string;
-      role?: string;
-      curriculumId: string;
-      chapterId?: string | null;
-      data: CreateLessonBodyDto;
-    },
-  ) {
-    return this.lessonService.createLessonService(payload);
+  create(@Payload() payload: unknown) {
+    return this.lessonService.createLessonService(
+      parseRpcPayload(lessonCreatePayloadSchema, payload),
+    );
   }
 
   @MessagePattern('lesson.getAll')
-  getAll(@Payload() payload: { query: GetLessonsQueryDto }) {
-    return this.lessonService.getAllLessonsService(payload);
+  getAll(@Payload() payload: unknown) {
+    return this.lessonService.getAllLessonsService(
+      parseRpcPayload(lessonGetAllPayloadSchema, payload),
+    );
   }
 
   @MessagePattern('lesson.getById')
-  getById(@Payload() payload: { id: string }) {
-    return this.lessonService.getLessonByIdService(payload);
+  getById(@Payload() payload: unknown) {
+    return this.lessonService.getLessonByIdService(parseRpcPayload(lessonIdPayloadSchema, payload));
   }
 
   @MessagePattern('lesson.update')
-  update(@Payload() payload: { userId: string; role?: string; id: string; data: UpdateLessonDto }) {
-    return this.lessonService.updateLessonService(payload);
+  update(@Payload() payload: unknown) {
+    return this.lessonService.updateLessonService(
+      parseRpcPayload(lessonUpdatePayloadSchema, payload),
+    );
   }
 
   @MessagePattern('lesson.delete')
-  del(@Payload() payload: { userId: string; role?: string; id: string }) {
-    return this.lessonService.deleteLessonService(payload);
+  del(@Payload() payload: unknown) {
+    return this.lessonService.deleteLessonService(
+      parseRpcPayload(lessonDeletePayloadSchema, payload),
+    );
   }
 }

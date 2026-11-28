@@ -18,6 +18,11 @@ import { MessageService } from './message.service';
 import { ConversationService } from './conversation.service';
 import { RmqProducer } from '../rabbitmq/rmq.producer';
 import { resolveCorsOrigins } from '@packages/helpers/cors.helper';
+import {
+  messageContentSchema,
+  MESSAGE_RATE_LIMIT_MAX,
+  MESSAGE_RATE_WINDOW_MS,
+} from './chat.schema';
 
 type AuthenticatedSocket = Socket & {
   userId?: string;
@@ -39,7 +44,20 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly logger = new Logger(ChatGateway.name);
 
   private readonly sessionTimers = new Map<string, ReturnType<typeof setTimeout>>(); // socketId -> expiry timer
-  private readonly onlineUsers = new Map<string, string>(); // userId -> socketId
+  private readonly onlineUsers = new Map<string, Set<string>>(); // userId -> socketIds (one user, many tabs)
+  private readonly messageWindows = new Map<string, { count: number; windowStart: number }>(); // socketId -> message:send window
+
+  // fixed-window limit per socket for message:send
+  private allowMessageSend(socketId: string, now = Date.now()): boolean {
+    const window = this.messageWindows.get(socketId);
+    if (!window || now - window.windowStart >= MESSAGE_RATE_WINDOW_MS) {
+      this.messageWindows.set(socketId, { count: 1, windowStart: now });
+      return true;
+    }
+    if (window.count >= MESSAGE_RATE_LIMIT_MAX) return false;
+    window.count += 1;
+    return true;
+  }
 
   constructor(
     private readonly jwtService: JwtService,
@@ -118,9 +136,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       client.userRole = decoded.role;
       client.userEmail = decoded.email;
 
-      this.onlineUsers.set(userId, client.id);
+      const sockets = this.onlineUsers.get(userId) ?? new Set<string>();
+      const wasOffline = sockets.size === 0;
+      sockets.add(client.id);
+      this.onlineUsers.set(userId, sockets);
 
-      this.server.emit('user:status', { userId, status: 'online' });
+      if (wasOffline) {
+        this.server.emit('user:status', { userId, status: 'online' });
+      }
 
       console.log(`[WS] User connected: ${userId} (${client.id})`);
     } catch (error) {
@@ -135,9 +158,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       clearTimeout(timer);
       this.sessionTimers.delete(client.id);
     }
+    this.messageWindows.delete(client.id);
     if (client.userId) {
-      this.onlineUsers.delete(client.userId);
-      this.server.emit('user:status', { userId: client.userId, status: 'offline' });
+      const sockets = this.onlineUsers.get(client.userId);
+      if (!sockets?.delete(client.id)) return; // this socket was never registered as online
+      // offline only once the user's last socket is gone
+      if (sockets.size === 0) {
+        this.onlineUsers.delete(client.userId);
+        this.server.emit('user:status', { userId: client.userId, status: 'offline' });
+      }
       console.log(`[WS] User disconnected: ${client.userId} (${client.id})`);
     }
   }
@@ -148,6 +177,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() data: { conversationId: string; content: string },
   ) {
     if (!client.userId) return;
+
+    if (!this.allowMessageSend(client.id)) {
+      return { event: 'message:error', data: { error: 'Too many messages, slow down' } };
+    }
+    if (!messageContentSchema.safeParse(data?.content).success) {
+      return { event: 'message:error', data: { error: 'Invalid message content' } };
+    }
 
     try {
       const message = await this.messageService.createMessage(
@@ -250,14 +286,21 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (!client.userId || !(await this.isParticipant(data?.conversationId, client.userId))) return;
 
     try {
-      await this.messageService.updateMessageStatus(data.messageId, 'READ');
+      // the message must belong to this conversation; otherwise nothing is updated or broadcast
+      const updated = await this.messageService.updateMessageStatus(
+        data.messageId,
+        'READ',
+        data.conversationId,
+      );
       await this.messageService.markConversationAsRead(data.conversationId, client.userId);
 
-      this.server.to(data.conversationId).emit('message:read', {
-        userId: client.userId,
-        conversationId: data.conversationId,
-        messageId: data.messageId,
-      });
+      if (updated) {
+        this.server.to(data.conversationId).emit('message:read', {
+          userId: client.userId,
+          conversationId: data.conversationId,
+          messageId: data.messageId,
+        });
+      }
     } catch (error) {
       console.error('[WS] Error marking message as read:', error);
     }
@@ -265,8 +308,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   // Utility: send to specific user
   sendToUser(userId: string, event: string, data: unknown) {
-    const socketId = this.onlineUsers.get(userId);
-    if (socketId) {
+    for (const socketId of this.onlineUsers.get(userId) ?? []) {
       this.server.to(socketId).emit(event, data);
     }
   }
@@ -278,6 +320,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   // Utility: check if user is online
   isUserOnline(userId: string): boolean {
-    return this.onlineUsers.has(userId);
+    return (this.onlineUsers.get(userId)?.size ?? 0) > 0;
   }
 }

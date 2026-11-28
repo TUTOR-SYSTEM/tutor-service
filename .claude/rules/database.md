@@ -17,6 +17,8 @@
   other environments with `bun run db:migrate` (`prisma migrate deploy`). Never hand-edit an
   already-applied migration (a hook blocks it) and do not run destructive DB commands
   (`migrate reset`, `db push --force-reset`, `scripts/recreate-db.ts`) automatically.
+- **Migration ownership (user vs tutor)**: `users`, `grades`, `user_role`, `gender`, and `users.must_change_password` belong to the user service (repo ../user). Tutor migrations must never create, alter or drop them; foreign keys that point at `users`/`grades` are fine. Run order on any DB: user-service migrations, then tutor's: `0_init` (historical, never run on a DB that has the user tables), `0_tutor_schema` (tutor baseline without user objects), the 2026* tutor migrations, `20261128000000_course_api_tables`. Do not use `db:migrate:dev` to generate tutor migrations: its shadow DB will also want to recreate `users`. Generate with `prisma migrate diff --from-url <db> --to-schema-datamodel prisma/schema.prisma --script`, drop the user-owned statements, and review DROPs by hand.
+- **Existing DBs**: mark `0_init` applied with `migrate resolve --applied 0_init` on every DB (after clearing a failed row with `--rolled-back 0_init`). If the tutor tables already exist (drizzle-built or previously migrated), also mark `0_tutor_schema` and `20261128000000_course_api_tables` applied. Otherwise let `db:migrate` run them.
 - **Baselining an existing database**: a DB created by the old drizzle-kit migrations already has
   every table. Run `bun run db:baseline` once (`prisma migrate resolve --applied 0_init`) instead
   of `db:migrate`, so `0_init` is recorded without being re-run. The only schema differences

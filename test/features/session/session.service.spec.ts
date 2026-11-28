@@ -40,7 +40,8 @@ describe('SessionService', () => {
       del: jest.fn(),
       findTakenSessionNumbers: jest.fn().mockResolvedValue([]),
       findExerciseStudentIds: jest.fn().mockResolvedValue([]),
-      createAssignedExercises: jest.fn().mockResolvedValue(undefined),
+      updateWithHomework: jest.fn().mockResolvedValue(undefined),
+      hasSubmittedExercises: jest.fn().mockResolvedValue(false),
     };
     // the class row carries its tutor: that is the default session tutor
     classService = {
@@ -319,26 +320,24 @@ describe('SessionService', () => {
   describe('updateSessionService / delSessionService', () => {
     it('updates an owned session', async () => {
       repo.getById.mockResolvedValue({ id: SESSION_ID, classId: CLASS_ID });
-      repo.update.mockResolvedValue({ id: SESSION_ID, status: 'COMPLETED' });
+      repo.update.mockResolvedValue({ id: SESSION_ID, title: 'Mới' });
 
       const result = await service.updateSessionService({
         userId: USER_ID,
         id: SESSION_ID,
-        data: { status: 'COMPLETED' } as never,
+        data: { title: 'Mới' },
       });
 
-      expect(repo.update).toHaveBeenCalledWith({
-        id: SESSION_ID,
-        data: { status: 'COMPLETED' },
-      });
-      expect(result).toEqual({ id: SESSION_ID, status: 'COMPLETED' });
+      expect(repo.update).toHaveBeenCalledWith({ id: SESSION_ID, data: { title: 'Mới' } });
+      expect(repo.updateWithHomework).not.toHaveBeenCalled();
+      expect(result).toEqual({ id: SESSION_ID, title: 'Mới' });
     });
 
     it('does not update when the session is missing', async () => {
       repo.getById.mockResolvedValue(null);
 
       await expect(
-        service.updateSessionService({ userId: USER_ID, id: SESSION_ID, data: {} as never }),
+        service.updateSessionService({ userId: USER_ID, id: SESSION_ID, data: {} }),
       ).rejects.toThrow(new NotFoundException(ERROR_MESSAGES.SESSION_NOT_FOUND));
       expect(repo.update).not.toHaveBeenCalled();
     });
@@ -397,7 +396,7 @@ describe('SessionService', () => {
         exerciseUrls: withHomework.exerciseUrls,
         exerciseDueAt: null,
       });
-      repo.update.mockResolvedValue(withHomework);
+      repo.updateWithHomework.mockResolvedValue(withHomework);
       classService.getRosterStudentIdsService.mockResolvedValue([STUDENT_A, STUDENT_B]);
       repo.findExerciseStudentIds.mockResolvedValue([STUDENT_A]);
 
@@ -407,11 +406,13 @@ describe('SessionService', () => {
         data: { status: 'COMPLETED' } as never,
       });
 
-      expect(repo.createAssignedExercises).toHaveBeenCalledWith({
-        sessionId: SESSION_ID,
-        tutorId: USER_ID,
-        studentIds: [STUDENT_B],
+      // status and homework rows go to the repository in one call (one transaction)
+      expect(repo.updateWithHomework).toHaveBeenCalledWith({
+        id: SESSION_ID,
+        data: { status: 'COMPLETED' },
+        homework: { tutorId: USER_ID, studentIds: [STUDENT_B] },
       });
+      expect(repo.update).not.toHaveBeenCalled();
       expect(notifier.notifyUsers).toHaveBeenCalledTimes(1);
       expect(notifier.notifyUsers).toHaveBeenCalledWith(
         expect.objectContaining({ type: 'STUDENT', recipients: [STUDENT_B] }),
@@ -428,7 +429,7 @@ describe('SessionService', () => {
         data: { status: 'COMPLETED' } as never,
       });
 
-      expect(repo.createAssignedExercises).not.toHaveBeenCalled();
+      expect(repo.updateWithHomework).not.toHaveBeenCalled();
       expect(notifier.notifyUsers).not.toHaveBeenCalled();
     });
 
@@ -440,7 +441,7 @@ describe('SessionService', () => {
         status: 'ONGOING',
         exerciseUrls: [],
       });
-      repo.update.mockResolvedValue({ ...withHomework, exerciseUrls: [] });
+      repo.updateWithHomework.mockResolvedValue({ ...withHomework, exerciseUrls: [] });
 
       await service.updateSessionService({
         userId: USER_ID,
@@ -448,7 +449,111 @@ describe('SessionService', () => {
         data: { status: 'COMPLETED' } as never,
       });
 
-      expect(repo.createAssignedExercises).not.toHaveBeenCalled();
+      expect(repo.updateWithHomework).toHaveBeenCalledWith(
+        expect.objectContaining({ homework: null }),
+      );
+      expect(notifier.notifyUsers).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('TS-02: ending a session validates the tutor and writes once', () => {
+    const OLD_TUTOR_ID = '88888888-8888-4888-8888-888888888888';
+    const STUDENT_A = '66666666-6666-4666-8666-666666666666';
+    const STUDENT_B = '77777777-7777-4777-8777-777777777777';
+    const ONGOING = {
+      id: SESSION_ID,
+      classId: CLASS_ID,
+      tutorId: USER_ID,
+      lessonId: null,
+      title: 'Động học',
+      sessionNumber: 3,
+      startAt: new Date('2026-01-01T08:00:00Z'),
+      endAt: new Date('2026-01-01T09:00:00Z'),
+      status: 'ONGOING',
+      exerciseUrls: [{ name: 'bt.pdf', url: 'u', key: 'k' }],
+      exerciseDueAt: null,
+    };
+
+    it('rejects a tutorId that is not the class tutor, before any write', async () => {
+      repo.getById.mockResolvedValue(ONGOING);
+
+      await expect(
+        service.updateSessionService({
+          userId: USER_ID,
+          id: SESSION_ID,
+          data: { status: 'COMPLETED', tutorId: OTHER_USER_ID } as never,
+        }),
+      ).rejects.toThrow(new NotFoundException(ERROR_MESSAGES.TUTOR_NOT_FOUND));
+      expect(repo.updateWithHomework).not.toHaveBeenCalled();
+      expect(repo.update).not.toHaveBeenCalled();
+      expect(classService.getRosterStudentIdsService).not.toHaveBeenCalled();
+      expect(notifier.notifyUsers).not.toHaveBeenCalled();
+    });
+
+    it('does not let the session tutor change once a student has submitted work', async () => {
+      repo.getById.mockResolvedValue({ ...ONGOING, tutorId: OLD_TUTOR_ID });
+      repo.hasSubmittedExercises.mockResolvedValue(true);
+
+      await expect(
+        service.updateSessionService({
+          userId: USER_ID,
+          id: SESSION_ID,
+          data: { tutorId: USER_ID },
+        }),
+      ).rejects.toThrow(new ConflictException(ERROR_MESSAGES.SESSION_TUTOR_LOCKED));
+      expect(repo.hasSubmittedExercises).toHaveBeenCalledWith({ sessionId: SESSION_ID });
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('allows the class tutor as the new session tutor when nothing was submitted', async () => {
+      repo.getById.mockResolvedValue({ ...ONGOING, tutorId: OLD_TUTOR_ID });
+      repo.update.mockResolvedValue({ id: SESSION_ID });
+
+      await service.updateSessionService({
+        userId: USER_ID,
+        id: SESSION_ID,
+        data: { tutorId: USER_ID },
+      });
+
+      expect(repo.update).toHaveBeenCalledWith({
+        id: SESSION_ID,
+        data: expect.objectContaining({ tutorId: USER_ID }),
+      });
+    });
+
+    it('uses the validated tutor as the homework tutor and writes status + rows together', async () => {
+      repo.getById.mockResolvedValue({ ...ONGOING, tutorId: OLD_TUTOR_ID });
+      repo.updateWithHomework.mockResolvedValue({ id: SESSION_ID, status: 'COMPLETED' });
+      classService.getRosterStudentIdsService.mockResolvedValue([STUDENT_A, STUDENT_B]);
+      repo.findExerciseStudentIds.mockResolvedValue([]);
+
+      await service.updateSessionService({
+        userId: USER_ID,
+        id: SESSION_ID,
+        data: { status: 'COMPLETED', tutorId: USER_ID } as never,
+      });
+
+      expect(repo.updateWithHomework).toHaveBeenCalledWith(
+        expect.objectContaining({
+          homework: { tutorId: USER_ID, studentIds: [STUDENT_A, STUDENT_B] },
+        }),
+      );
+    });
+
+    it('does not notify students when the session row is gone at write time', async () => {
+      repo.getById.mockResolvedValue(ONGOING);
+      repo.updateWithHomework.mockResolvedValue(null);
+      classService.getRosterStudentIdsService.mockResolvedValue([STUDENT_A]);
+      repo.findExerciseStudentIds.mockResolvedValue([]);
+
+      const result = await service.updateSessionService({
+        userId: USER_ID,
+        id: SESSION_ID,
+        data: { status: 'COMPLETED' } as never,
+      });
+
+      expect(result).toBeNull();
+      expect(notifier.notifyUsers).not.toHaveBeenCalled();
     });
   });
 
@@ -490,7 +595,7 @@ describe('SessionService', () => {
       await expect(
         service.createSessionsService({
           userId: 'nope',
-          data: { classId: CLASS_ID, sessions: [] } as never,
+          data: { classId: CLASS_ID, sessions: [] },
         }),
       ).rejects.toThrow(new BadRequestException(ERROR_MESSAGES.USER_ID_MUST_BE_UUID));
       expect(lessonService.getLessonByIdService).not.toHaveBeenCalled();
@@ -588,7 +693,7 @@ describe('SessionService', () => {
         service.updateSessionService({
           userId: USER_ID,
           id: SESSION_ID,
-          data: { sessionNumber: 5 } as never,
+          data: { sessionNumber: 5 },
         }),
       ).rejects.toThrow(new ConflictException(ERROR_MESSAGES.SESSION_NUMBER_DUPLICATE));
       expect(repo.findTakenSessionNumbers).toHaveBeenCalledWith({
@@ -606,7 +711,7 @@ describe('SessionService', () => {
       await service.updateSessionService({
         userId: USER_ID,
         id: SESSION_ID,
-        data: { sessionNumber: 1 } as never,
+        data: { sessionNumber: 1 },
       });
 
       expect(repo.findTakenSessionNumbers).not.toHaveBeenCalled();
@@ -617,7 +722,7 @@ describe('SessionService', () => {
   describe('owned-session guards', () => {
     it('updateSessionService rejects an empty userId before loading the session', async () => {
       await expect(
-        service.updateSessionService({ userId: '', id: SESSION_ID, data: {} as never }),
+        service.updateSessionService({ userId: '', id: SESSION_ID, data: {} }),
       ).rejects.toThrow(new BadRequestException(ERROR_MESSAGES.USER_ID_MUST_BE_UUID));
       expect(repo.getDetailById).not.toHaveBeenCalled();
     });

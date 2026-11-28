@@ -170,8 +170,8 @@ despite the matching packages being installed — don't add them to `.env` specu
 
 Configured in `.claude/settings.json` (scripts in `.claude/hooks/`):
 
-- **PreToolUse (Write|Edit)** → `guard-paths.mjs` blocks edits to `.env*` and applied
-  `prisma/migrations/**` files.
+- **PreToolUse (Write|Edit)** → `guard-paths.mjs` gates no paths: `.env*` and
+  `prisma/migrations/**` are editable (user decision 2026-11-28).
 - **PostToolUse (Write|Edit)** → `format-ts.mjs` runs prettier + eslint `--fix` on the
   touched `.ts/.js` file.
 - **Stop** → `review-skills.mjs` runs after each task that changed `src/`, and asks Claude to

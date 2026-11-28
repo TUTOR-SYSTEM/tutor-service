@@ -1,50 +1,54 @@
 import { Controller } from '@nestjs/common';
 import { MessagePattern, Payload } from '@nestjs/microservices';
-import type {
-  CreateTuitionDto,
-  GetTuitionsQueryDto,
-  UpdateTuitionDto,
-} from '@packages/entities/tuition';
+import {
+  tuitionCreatePayloadSchema,
+  tuitionGetAllPayloadSchema,
+  tuitionGetSummaryPayloadSchema,
+  tuitionIdPayloadSchema,
+  tuitionUpdatePayloadSchema,
+} from '@packages/entities/rpc';
+import { parseRpcPayload } from '@packages/pipes';
 import { TuitionService } from './tuition.service';
 
 /**
  * Message-pattern mirror of `TuitionController` — reached only by the gateway's `TUTOR_SERVICE`
- * `ClientProxy` over RabbitMQ. Delegates to the same, unmodified
- * `TuitionService` the HTTP controller uses; no business logic lives here.
+ * `ClientProxy` over RabbitMQ. Validates the payload (`rpc-payload.schema.ts`) and delegates to
+ * the same, unmodified `TuitionService` the HTTP controller uses; no business logic lives here.
  */
 @Controller()
 export class TuitionRpcController {
   constructor(private readonly tuitionService: TuitionService) {}
 
   @MessagePattern('tuition.create')
-  create(@Payload() payload: { data: CreateTuitionDto; userId: string; role?: string }) {
-    return this.tuitionService.create(payload.data, payload.userId, payload.role);
+  create(@Payload() payload: unknown) {
+    const parsed = parseRpcPayload(tuitionCreatePayloadSchema, payload);
+    return this.tuitionService.create(parsed.data, parsed.userId, parsed.role);
   }
 
   @MessagePattern('tuition.getAll')
-  getAll(@Payload() payload: { userId: string; role?: string; query: GetTuitionsQueryDto }) {
-    return this.tuitionService.findAll(payload);
+  getAll(@Payload() payload: unknown) {
+    return this.tuitionService.findAll(parseRpcPayload(tuitionGetAllPayloadSchema, payload));
   }
 
   @MessagePattern('tuition.getSummary')
-  getSummary(@Payload() payload: { userId: string; role?: string; classId?: string }) {
-    return this.tuitionService.getSummary(payload);
+  getSummary(@Payload() payload: unknown) {
+    return this.tuitionService.getSummary(parseRpcPayload(tuitionGetSummaryPayloadSchema, payload));
   }
 
   @MessagePattern('tuition.getById')
-  getById(@Payload() payload: { userId: string; role?: string; id: string }) {
-    return this.tuitionService.findById(payload);
+  getById(@Payload() payload: unknown) {
+    return this.tuitionService.findById(parseRpcPayload(tuitionIdPayloadSchema, payload));
   }
 
   @MessagePattern('tuition.update')
-  update(
-    @Payload() payload: { id: string; data: UpdateTuitionDto; userId: string; role?: string },
-  ) {
-    return this.tuitionService.update(payload.id, payload.data, payload.userId, payload.role);
+  update(@Payload() payload: unknown) {
+    const parsed = parseRpcPayload(tuitionUpdatePayloadSchema, payload);
+    return this.tuitionService.update(parsed.id, parsed.data, parsed.userId, parsed.role);
   }
 
   @MessagePattern('tuition.delete')
-  del(@Payload() payload: { id: string; userId: string; role?: string }) {
-    return this.tuitionService.delete(payload.id, payload.userId, payload.role);
+  del(@Payload() payload: unknown) {
+    const parsed = parseRpcPayload(tuitionIdPayloadSchema, payload);
+    return this.tuitionService.delete(parsed.id, parsed.userId, parsed.role);
   }
 }

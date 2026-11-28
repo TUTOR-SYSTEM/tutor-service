@@ -192,28 +192,12 @@ export class SessionRepository {
     return rows.map((row) => row.studentId);
   }
 
-  /** Giao bài tập: tạo dòng exercise ASSIGNED (chưa nộp) cho từng học sinh. */
-  async createAssignedExercises({
-    sessionId,
-    tutorId,
-    studentIds,
-  }: {
-    sessionId: string;
-    tutorId: string;
-    studentIds: string[];
-  }) {
-    if (studentIds.length === 0) return;
-    await this.prisma.exercise.createMany({
-      data: studentIds.map((studentId) => ({
-        sessionId,
-        tutorId,
-        studentId,
-        status: 'ASSIGNED' as const,
-        exerciseUrls: [],
-      })),
-      // unique (session_id, student_id): a concurrent "complete" call skips rows it lost to
-      skipDuplicates: true,
+  /** Có bài nào của buổi đã nộp/được chấm (không còn ASSIGNED): khoá đổi gia sư của buổi. */
+  async hasSubmittedExercises({ sessionId }: { sessionId: string }) {
+    const count = await this.prisma.exercise.count({
+      where: { sessionId, status: { not: 'ASSIGNED' } },
     });
+    return count > 0;
   }
 
   async update({ id, data }: { id: string; data: UpdateSessionDto }) {
@@ -221,6 +205,46 @@ export class SessionRepository {
       return await this.prisma.classSession.update({
         where: { id },
         data: toSessionData(data as CreateSessionDto),
+      });
+    } catch (error) {
+      if (isRecordNotFound(error)) return null;
+      throw error;
+    }
+  }
+
+  /**
+   * Kết thúc buổi: ghi trạng thái buổi và dòng bài tập ASSIGNED (mỗi học sinh mới một dòng) trong
+   * CÙNG một transaction — lỗi giao bài thì buổi vẫn chưa COMPLETED. Trả null khi buổi không tồn tại.
+   */
+  async updateWithHomework({
+    id,
+    data,
+    homework,
+  }: {
+    id: string;
+    data: UpdateSessionDto;
+    homework: { tutorId: string; studentIds: string[] } | null;
+  }) {
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const updated = await tx.classSession.update({
+          where: { id },
+          data: toSessionData(data as CreateSessionDto),
+        });
+        if (homework && homework.studentIds.length > 0) {
+          await tx.exercise.createMany({
+            data: homework.studentIds.map((studentId) => ({
+              sessionId: id,
+              tutorId: homework.tutorId,
+              studentId,
+              status: 'ASSIGNED' as const,
+              exerciseUrls: [],
+            })),
+            // unique (session_id, student_id): a concurrent "complete" call skips rows it lost to
+            skipDuplicates: true,
+          });
+        }
+        return updated;
       });
     } catch (error) {
       if (isRecordNotFound(error)) return null;

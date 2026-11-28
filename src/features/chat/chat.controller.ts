@@ -11,6 +11,17 @@ import {
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { ConversationService } from './conversation.service';
 import { MessageService } from './message.service';
+import { ZodValidationPipe } from '@packages/pipes';
+import {
+  addParticipantSchema,
+  createDirectConversationSchema,
+  createGroupConversationSchema,
+  getMessagesQuerySchema,
+  type AddParticipantDto,
+  type CreateDirectConversationDto,
+  type CreateGroupConversationDto,
+  type GetMessagesQueryDto,
+} from './chat.schema';
 import type { Request } from 'express';
 
 type JwtUser = {
@@ -74,22 +85,22 @@ export class ChatController {
   @ApiOperation({ summary: 'Get messages for a conversation' })
   async getMessages(
     @Param('id') id: string,
-    @Query('limit') limit?: string,
-    @Query('before') before?: string,
+    @Query(new ZodValidationPipe<GetMessagesQueryDto>(getMessagesQuerySchema))
+    query: GetMessagesQueryDto,
     @Req() req?: RequestWithUser,
   ) {
     const userId = req?.user?.id;
     if (!userId) {
       throw new UnauthorizedException();
     }
-    const messageLimit = limit ? parseInt(limit, 10) : 50;
-    return this.messageService.getMessages(id, userId, messageLimit, before);
+    return this.messageService.getMessages(id, userId, query.limit, query.before);
   }
 
   @Post('conversations/direct')
   @ApiOperation({ summary: 'Create or get direct conversation with another user' })
   async createDirectConversation(
-    @Body() body: { targetUserId: string },
+    @Body(new ZodValidationPipe<CreateDirectConversationDto>(createDirectConversationSchema))
+    body: CreateDirectConversationDto,
     @Req() req: RequestWithUser,
   ) {
     const userId = req.user?.id;
@@ -102,7 +113,8 @@ export class ChatController {
   @Post('conversations/group')
   @ApiOperation({ summary: 'Create group conversation' })
   async createGroupConversation(
-    @Body() body: { name: string; participantIds: string[] },
+    @Body(new ZodValidationPipe<CreateGroupConversationDto>(createGroupConversationSchema))
+    body: CreateGroupConversationDto,
     @Req() req: RequestWithUser,
   ) {
     const userId = req.user?.id;
@@ -119,14 +131,14 @@ export class ChatController {
     if (!userId) {
       throw new UnauthorizedException();
     }
-    return this.conversationService.createClassConversation(userId, classId);
+    return this.conversationService.createClassConversation(userId, classId, req.user?.role);
   }
 
   @Post('conversations/:id/participants')
   @ApiOperation({ summary: 'Add participant to conversation' })
   async addParticipant(
     @Param('id') id: string,
-    @Body() body: { userId: string },
+    @Body(new ZodValidationPipe<AddParticipantDto>(addParticipantSchema)) body: AddParticipantDto,
     @Req() req: RequestWithUser,
   ) {
     const userId = req.user?.id;
