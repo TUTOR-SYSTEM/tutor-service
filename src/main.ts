@@ -2,6 +2,7 @@
 // (module-top-level `process.env.RABBITMQ_URL` reads) never races ConfigModule's
 // dotenv loading — see gateway/USER's main.ts for the bug this prevents.
 import 'dotenv/config';
+import { resolveRabbitMqUrl } from './features/rabbitmq/rmq-url';
 import { Logger } from '@nestjs/common';
 import { NestFactory, Reflector } from '@nestjs/core';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
@@ -46,7 +47,7 @@ async function bootstrap() {
     {
       transport: Transport.RMQ,
       options: {
-        urls: [process.env.RABBITMQ_URL ?? 'amqp://guest:guest@localhost:5672'],
+        urls: [resolveRabbitMqUrl() ?? 'amqp://guest:guest@localhost:5672'],
         queue: process.env.TUTOR_QUEUE ?? 'tutor_queue',
         queueOptions: { durable: true },
         prefetchCount: 10,

@@ -1,10 +1,12 @@
+import { resolveRabbitMqUrl } from './rmq-url';
+
 export const USER_SERVICE = 'USER_SERVICE';
 export const TUTOR_SERVICE = 'TUTOR_SERVICE';
 export const THIRD_SERVICE = 'THIRD_SERVICE';
 
 export type RmqTarget = typeof USER_SERVICE | typeof TUTOR_SERVICE | typeof THIRD_SERVICE;
 
-export const RABBITMQ_URL = process.env.RABBITMQ_URL ?? 'amqp://guest:guest@localhost:5672';
+export const RABBITMQ_URL = resolveRabbitMqUrl() ?? 'amqp://guest:guest@localhost:5672';
 
 export const RMQ_QUEUES: Record<RmqTarget, string> = {
   [USER_SERVICE]: process.env.USER_QUEUE ?? 'user_queue',

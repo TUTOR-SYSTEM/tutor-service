@@ -154,7 +154,7 @@ controller, no RPC — see its own doc comment) rather than an owned domain feat
 | `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET` | Must match `user`/`gateway`'s secrets |
 | `JWT_ACCESS_EXPIRES_SECONDS` / `JWT_REFRESH_EXPIRES_SECONDS` | Token TTLs |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_CALLBACK_URL` | Referenced but OAuth flows actually live in `gateway`/`user` — check before assuming this repo needs them configured |
-| `RABBITMQ_URL`                | RabbitMQ connection URL (local `amqp://admin:admin@localhost:5672`; Railway: RabbitMQ service private URL) |
+| `RABBITMQ_URL`                | RabbitMQ connection URL (local `amqp://admin:admin@localhost:5672`; Railway: RabbitMQ service private URL). Optional if `RABBITMQ_HOST` is set: then built from `RABBITMQ_HOST`, `RABBITMQ_PORT` (5672), `RABBITMQ_USER`/`RABBITMQ_DEFAULT_USER`, `RABBITMQ_PASSWORD`/`RABBITMQ_DEFAULT_PASS`, `RABBITMQ_VHOST` (`/`), `RABBITMQ_TLS=true` (amqps) |
 | `TUTOR_QUEUE`                 | RMQ listener queue name (default `tutor_queue`) |
 
 No `REDIS_*`, `AWS_*`, `CLOUDINARY_*`, `MAIL_*`, or `RESEND_*` vars are read anywhere in `src/`
