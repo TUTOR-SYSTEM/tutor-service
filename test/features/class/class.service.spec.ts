@@ -10,6 +10,7 @@ import { ClassService } from 'src/features/class/class.service';
 import { ClassRepository } from 'src/features/class/class.repository';
 import { UserService } from 'src/features/user/user.service';
 import { NotificationNotifier } from 'src/features/notification/notification.notifier';
+import { UserLinkClient } from 'src/features/class/user-link.client';
 
 // class.repository pulls an ESM-only transitive dep (uuid) that jest cannot parse;
 // the service only needs the repository token, so swap the module for a bare class
@@ -30,6 +31,7 @@ describe('ClassService', () => {
   let repo: Record<string, jest.Mock>;
   let notifier: { notifyUsers: jest.Mock };
   let user: { userExists: jest.Mock; getUserRoleById: jest.Mock; getUserRolesByIds: jest.Mock };
+  let userLink: { linkStudentsToTutor: jest.Mock; releaseStudentParent: jest.Mock };
 
   beforeEach(async () => {
     repo = {
@@ -53,6 +55,10 @@ describe('ClassService', () => {
       getPublicTutor: jest.fn().mockResolvedValue(null),
     };
     notifier = { notifyUsers: jest.fn().mockResolvedValue(undefined) };
+    userLink = {
+      linkStudentsToTutor: jest.fn().mockResolvedValue({}),
+      releaseStudentParent: jest.fn().mockResolvedValue({}),
+    };
     user = {
       userExists: jest.fn().mockResolvedValue(true),
       getUserRoleById: jest.fn().mockResolvedValue({ id: TUTOR_ID, role: 'TUTOR' }),
@@ -68,6 +74,7 @@ describe('ClassService', () => {
         { provide: ClassRepository, useValue: repo },
         { provide: UserService, useValue: user },
         { provide: NotificationNotifier, useValue: notifier },
+        { provide: UserLinkClient, useValue: userLink },
       ],
     }).compile();
 
@@ -245,7 +252,7 @@ describe('ClassService', () => {
           userId: TUTOR_ID,
           role: 'ADMIN',
           id: CLASS_ID,
-          data: { subject: 'Math' } as never,
+          data: { subject: 'Math' },
         }),
       ).resolves.toMatchObject({ subject: 'Math' });
     });
@@ -275,7 +282,7 @@ describe('ClassService', () => {
       repo.getClassByField.mockResolvedValue({ ...existing, tutorId: OTHER_TUTOR_ID });
 
       await expect(
-        service.updateClassService({ userId: TUTOR_ID, id: CLASS_ID, data: {} as never }),
+        service.updateClassService({ userId: TUTOR_ID, id: CLASS_ID, data: {} }),
       ).rejects.toThrow(new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND));
       expect(repo.updateWithRoster).not.toHaveBeenCalled();
     });
@@ -289,7 +296,7 @@ describe('ClassService', () => {
         service.updateClassService({
           userId: TUTOR_ID,
           id: CLASS_ID,
-          data: { name: 'Taken' } as never,
+          data: { name: 'Taken' },
         }),
       ).rejects.toThrow(new BadRequestException(ERROR_MESSAGES.CLASS_NAME_EXISTS));
     });
@@ -303,7 +310,7 @@ describe('ClassService', () => {
         service.updateClassService({
           userId: TUTOR_ID,
           id: CLASS_ID,
-          data: { code: 'TAKEN' } as never,
+          data: { code: 'TAKEN' },
         }),
       ).rejects.toThrow(new BadRequestException(ERROR_MESSAGES.CLASS_CODE_EXISTS));
       expect(repo.updateWithRoster).not.toHaveBeenCalled();
@@ -316,7 +323,7 @@ describe('ClassService', () => {
       await service.updateClassService({
         userId: TUTOR_ID,
         id: CLASS_ID,
-        data: { code: 'C0' } as never,
+        data: { code: 'C0' },
       });
 
       const codeLookups = repo.getClassByField.mock.calls.filter(
@@ -333,7 +340,7 @@ describe('ClassService', () => {
         service.updateClassService({
           userId: TUTOR_ID,
           id: CLASS_ID,
-          data: { name: 'Old' } as never,
+          data: { name: 'Old' },
         }),
       ).resolves.toMatchObject({ name: 'Old' });
     });
@@ -345,7 +352,7 @@ describe('ClassService', () => {
       await service.updateClassService({
         userId: TUTOR_ID,
         id: CLASS_ID,
-        data: { studentIds: [STUDENT_A, STUDENT_A, STUDENT_B], name: 'Old' } as never,
+        data: { studentIds: [STUDENT_A, STUDENT_A, STUDENT_B], name: 'Old' },
       });
 
       expect(user.getUserRolesByIds).toHaveBeenCalledWith([STUDENT_A, STUDENT_B]);
@@ -367,7 +374,7 @@ describe('ClassService', () => {
         service.updateClassService({
           userId: TUTOR_ID,
           id: CLASS_ID,
-          data: { studentIds: [STUDENT_A, STUDENT_B] } as never,
+          data: { studentIds: [STUDENT_A, STUDENT_B] },
         }),
       ).rejects.toThrow(BadRequestException);
       expect(repo.updateWithRoster).not.toHaveBeenCalled();
@@ -386,7 +393,7 @@ describe('ClassService', () => {
           userId: TUTOR_ID,
           role: 'TUTOR',
           id: CLASS_ID,
-          data: { studentIds: [STUDENT_A, STUDENT_B] } as never,
+          data: { studentIds: [STUDENT_A, STUDENT_B] },
         }),
       ).rejects.toThrow(NotFoundException);
       expect(repo.updateWithRoster).not.toHaveBeenCalled();
@@ -404,7 +411,7 @@ describe('ClassService', () => {
         userId: TUTOR_ID,
         role: 'TUTOR',
         id: CLASS_ID,
-        data: { studentIds: [STUDENT_A, STUDENT_B] } as never,
+        data: { studentIds: [STUDENT_A, STUDENT_B] },
       });
       expect(repo.updateWithRoster).toHaveBeenCalledWith({
         id: CLASS_ID,
@@ -425,7 +432,7 @@ describe('ClassService', () => {
           userId: TUTOR_ID,
           role: 'TUTOR',
           id: CLASS_ID,
-          data: { studentIds: [STUDENT_A] } as never,
+          data: { studentIds: [STUDENT_A] },
         }),
       ).rejects.toThrow(new BadRequestException(ERROR_MESSAGES.CLASS_TUTOR_CONFLICT));
       expect(repo.findStudentIdsWithOtherTutor).toHaveBeenCalledWith({
@@ -447,7 +454,7 @@ describe('ClassService', () => {
           userId: TUTOR_ID,
           role: 'ADMIN',
           id: CLASS_ID,
-          data: { tutorId: OTHER_TUTOR_ID } as never,
+          data: { tutorId: OTHER_TUTOR_ID },
         }),
       ).rejects.toThrow(new BadRequestException(ERROR_MESSAGES.CLASS_TUTOR_CONFLICT));
       expect(repo.findStudentIdsWithOtherTutor).toHaveBeenCalledWith({
@@ -468,7 +475,7 @@ describe('ClassService', () => {
           userId: TUTOR_ID,
           role: 'TUTOR',
           id: CLASS_ID,
-          data: { studentIds: [STUDENT_A] } as never,
+          data: { studentIds: [STUDENT_A] },
         }),
       ).resolves.toBeDefined();
     });
@@ -481,7 +488,7 @@ describe('ClassService', () => {
         service.updateClassService({
           userId: TUTOR_ID,
           id: CLASS_ID,
-          data: { studentIds: [STUDENT_A] } as never,
+          data: { studentIds: [STUDENT_A] },
         }),
       ).rejects.toThrow(
         new BadRequestException(`${ERROR_MESSAGES.STUDENT_NOT_FOUND}: ${STUDENT_A}`),
@@ -493,7 +500,7 @@ describe('ClassService', () => {
       repo.updateWithRoster.mockResolvedValue(null);
 
       await expect(
-        service.updateClassService({ userId: TUTOR_ID, id: CLASS_ID, data: {} as never }),
+        service.updateClassService({ userId: TUTOR_ID, id: CLASS_ID, data: {} }),
       ).rejects.toThrow(new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND));
     });
 
@@ -504,7 +511,7 @@ describe('ClassService', () => {
       await service.updateClassService({
         userId: TUTOR_ID,
         id: CLASS_ID,
-        data: { name: 'Old' } as never,
+        data: { name: 'Old' },
       });
 
       expect(repo.updateWithRoster).toHaveBeenCalledWith({
@@ -527,7 +534,7 @@ describe('ClassService', () => {
         userId: TUTOR_ID,
         role: 'TUTOR',
         id: CLASS_ID,
-        data: { studentIds: [STUDENT_A, STUDENT_B] } as never,
+        data: { studentIds: [STUDENT_A, STUDENT_B] },
       });
 
       // STUDENT_A đã thuộc lớp nên không kiểm tra lại (dù thuộc gia sư khác)
@@ -541,7 +548,7 @@ describe('ClassService', () => {
         service.updateClassService({
           userId: TUTOR_ID,
           id: CLASS_ID,
-          data: { studentIds: [STUDENT_A, STUDENT_B] } as never,
+          data: { studentIds: [STUDENT_A, STUDENT_B] },
         }),
       ).rejects.toThrow(new BadRequestException(ERROR_MESSAGES.CLASS_CAPACITY_EXCEEDED));
       expect(repo.updateWithRoster).not.toHaveBeenCalled();
@@ -555,7 +562,7 @@ describe('ClassService', () => {
         service.updateClassService({
           userId: TUTOR_ID,
           id: CLASS_ID,
-          data: { maxStudents: 1 } as never,
+          data: { maxStudents: 1 },
         }),
       ).rejects.toThrow(new BadRequestException(ERROR_MESSAGES.CLASS_CAPACITY_EXCEEDED));
       expect(repo.updateWithRoster).not.toHaveBeenCalled();
@@ -572,7 +579,7 @@ describe('ClassService', () => {
         service.updateClassService({
           userId: TUTOR_ID,
           id: CLASS_ID,
-          data: { endTime: new Date('2026-09-01T09:00:00Z') } as never,
+          data: { endTime: new Date('2026-09-01T09:00:00Z') },
         }),
       ).rejects.toThrow(new BadRequestException(ERROR_MESSAGES.CLASS_END_BEFORE_START));
       expect(repo.updateWithRoster).not.toHaveBeenCalled();
@@ -590,7 +597,7 @@ describe('ClassService', () => {
         service.updateClassService({
           userId: TUTOR_ID,
           id: CLASS_ID,
-          data: { subject: 'Math' } as never,
+          data: { subject: 'Math' },
         }),
       ).resolves.toBeDefined();
     });
@@ -602,7 +609,7 @@ describe('ClassService', () => {
       await service.updateClassService({
         userId: TUTOR_ID,
         id: CLASS_ID,
-        data: { description: null, location: null, curriculumId: null } as never,
+        data: { description: null, location: null, curriculumId: null },
       });
 
       expect(repo.updateWithRoster).toHaveBeenCalledWith({
@@ -621,7 +628,7 @@ describe('ClassService', () => {
         userId: TUTOR_ID,
         role: 'ADMIN',
         id: CLASS_ID,
-        data: { tutorId: OTHER_TUTOR_ID } as never,
+        data: { tutorId: OTHER_TUTOR_ID },
       });
 
       expect(repo.updateWithRoster).toHaveBeenCalledWith({
@@ -639,7 +646,7 @@ describe('ClassService', () => {
           userId: TUTOR_ID,
           role: 'TUTOR',
           id: CLASS_ID,
-          data: { tutorId: OTHER_TUTOR_ID } as never,
+          data: { tutorId: OTHER_TUTOR_ID },
         }),
       ).rejects.toThrow(new ForbiddenException(ERROR_MESSAGES.PERMISSION_DENIED));
       expect(repo.updateWithRoster).not.toHaveBeenCalled();
@@ -654,7 +661,7 @@ describe('ClassService', () => {
           userId: TUTOR_ID,
           role: 'ADMIN',
           id: CLASS_ID,
-          data: { tutorId: OTHER_TUTOR_ID } as never,
+          data: { tutorId: OTHER_TUTOR_ID },
         }),
       ).rejects.toThrow(new BadRequestException(ERROR_MESSAGES.TUTOR_NOT_FOUND));
     });
@@ -860,7 +867,7 @@ describe('ClassService', () => {
           userId: 'nope',
           classId: CLASS_ID,
           data: { studentIds: [] },
-        } as never),
+        }),
       ).rejects.toThrow(new BadRequestException(ERROR_MESSAGES.USER_ID_MUST_BE_UUID));
       expect(repo.getClassByField).not.toHaveBeenCalled();
     });
@@ -871,7 +878,7 @@ describe('ClassService', () => {
           userId: TUTOR_ID,
           classId: 'nope',
           data: { studentIds: [] },
-        } as never),
+        }),
       ).rejects.toThrow(new BadRequestException(ERROR_MESSAGES.CLASS_ID_MUST_BE_UUID));
       expect(repo.getClassByField).not.toHaveBeenCalled();
     });
@@ -915,6 +922,18 @@ describe('ClassService', () => {
       });
     });
 
+    it('links every requested student to the class tutor through user-service (TS-23)', async () => {
+      repo.getClassByField.mockResolvedValue({ id: CLASS_ID, tutorId: TUTOR_ID, name: 'Toán 9' });
+      repo.addStudents.mockResolvedValue([]);
+
+      await service.addStudentsService(input([STUDENT_A, STUDENT_B]));
+
+      expect(userLink.linkStudentsToTutor).toHaveBeenCalledWith(
+        { id: TUTOR_ID, role: undefined },
+        { classId: CLASS_ID, studentIds: [STUDENT_A, STUDENT_B] },
+      );
+    });
+
     it('notifies only the newly added students, with the class name and link', async () => {
       repo.getClassByField.mockResolvedValue({ id: CLASS_ID, tutorId: TUTOR_ID, name: 'Toán 9' });
       repo.addStudents.mockResolvedValue([{ studentId: STUDENT_A }]);
@@ -942,7 +961,6 @@ describe('ClassService', () => {
       expect(repo.addStudents).toHaveBeenCalledWith({
         classId: CLASS_ID,
         studentIds: [STUDENT_A, STUDENT_B],
-        tutorId: TUTOR_ID,
       });
       expect(result).toEqual({
         classId: CLASS_ID,
@@ -1230,10 +1248,10 @@ describe('ClassService', () => {
 
     it('updateClassService rejects an empty userId and a non-UUID class id', async () => {
       await expect(
-        service.updateClassService({ userId: '', id: CLASS_ID, data: {} as never }),
+        service.updateClassService({ userId: '', id: CLASS_ID, data: {} }),
       ).rejects.toThrow(new BadRequestException(ERROR_MESSAGES.USER_ID_MUST_BE_UUID));
       await expect(
-        service.updateClassService({ userId: TUTOR_ID, id: 'nope', data: {} as never }),
+        service.updateClassService({ userId: TUTOR_ID, id: 'nope', data: {} }),
       ).rejects.toThrow(new BadRequestException(ERROR_MESSAGES.CLASS_ID_MUST_BE_UUID));
       expect(repo.getClassByField).not.toHaveBeenCalled();
     });

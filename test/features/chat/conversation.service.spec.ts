@@ -370,23 +370,31 @@ describe('ConversationService', () => {
       });
     });
 
-    it('tutor -> parent: resolves the parent to a child before checking enrollment', async () => {
+    it('tutor -> parent: true when a child is enrolled in one of the tutor classes', async () => {
       prisma.user.findUnique.mockResolvedValue({ role: 'PARENT' });
-      prisma.user.findFirst.mockResolvedValue({ id: THIRD_ID });
       prisma.classStudent.findFirst.mockResolvedValue({ id: 'cs' });
 
       await expect(check('checkTutorStudentAccess', USER_ID, OTHER_ID)).resolves.toBe(true);
-      expect(prisma.classStudent.findFirst).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { studentId: THIRD_ID, class: { tutorId: USER_ID } } }),
-      );
+      expect(prisma.classStudent.findFirst).toHaveBeenCalledWith({
+        where: { student: { parentId: OTHER_ID }, class: { tutorId: USER_ID } },
+        select: { id: true },
+      });
     });
 
-    it('tutor -> parent without children is denied', async () => {
+    it('tutor -> parent: looks at every child, not only the first one (TS-10)', async () => {
       prisma.user.findUnique.mockResolvedValue({ role: 'PARENT' });
-      prisma.user.findFirst.mockResolvedValue(null);
+      // a single query spans all children; the first child alone is never resolved
+      prisma.classStudent.findFirst.mockResolvedValue({ id: 'cs' });
+
+      await expect(check('checkTutorStudentAccess', USER_ID, OTHER_ID)).resolves.toBe(true);
+      expect(prisma.user.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('tutor -> parent with no child in the tutor classes is denied', async () => {
+      prisma.user.findUnique.mockResolvedValue({ role: 'PARENT' });
+      prisma.classStudent.findFirst.mockResolvedValue(null);
 
       await expect(check('checkTutorStudentAccess', USER_ID, OTHER_ID)).resolves.toBe(false);
-      expect(prisma.classStudent.findFirst).not.toHaveBeenCalled();
     });
 
     it('tutor -> unknown user is denied', async () => {
@@ -457,6 +465,18 @@ describe('ConversationService', () => {
       expect(data.map((d: { userId: string }) => d.userId)).toEqual([USER_ID, OTHER_ID, THIRD_ID]);
     });
 
+    it('dedupes repeated participant ids so the insert does not hit the unique key (TS-12)', async () => {
+      await service.createGroupConversation(USER_ID, 'Study', [
+        OTHER_ID,
+        OTHER_ID,
+        USER_ID,
+        OTHER_ID,
+      ]);
+
+      const { data } = prisma.conversationParticipant.createMany.mock.calls[0][0];
+      expect(data.map((d: { userId: string }) => d.userId)).toEqual([USER_ID, OTHER_ID]);
+    });
+
     it('rejects a member the creator is not allowed to chat with (no insert)', async () => {
       prisma.user.findMany.mockResolvedValue([
         { id: USER_ID, role: 'PARENT' },
@@ -496,7 +516,7 @@ describe('ConversationService', () => {
       prisma.class.findUnique.mockResolvedValue({ id: CLASS_ID, name: 'Math', tutorId: USER_ID });
       prisma.conversation.findFirst.mockResolvedValue({ id: CONV_ID });
 
-      await service.createClassConversation(USER_ID, CLASS_ID);
+      await service.createClassConversation(USER_ID, CLASS_ID, 'TUTOR');
 
       expect(prisma.conversation.findFirst).toHaveBeenCalledWith({
         where: { classId: CLASS_ID, type: 'CLASS' },
@@ -513,7 +533,7 @@ describe('ConversationService', () => {
         { studentId: THIRD_ID },
       ]);
 
-      await service.createClassConversation(USER_ID, CLASS_ID);
+      await service.createClassConversation(USER_ID, CLASS_ID, 'TUTOR');
 
       expect(prisma.conversation.create).toHaveBeenCalledWith({
         data: { type: 'CLASS', name: 'Math', classId: CLASS_ID, createdBy: USER_ID },
@@ -521,6 +541,57 @@ describe('ConversationService', () => {
       expect(prisma.conversationParticipant.createMany).toHaveBeenCalledWith({
         data: [USER_ID, OTHER_ID, THIRD_ID].map((userId) => ({ conversationId: CONV_ID, userId })),
       });
+    });
+  });
+
+  describe('createClassConversation authorization (TS-04)', () => {
+    beforeEach(() => {
+      jest.spyOn(service, 'getConversationById').mockResolvedValue({ id: CONV_ID } as never);
+      prisma.class.findUnique.mockResolvedValue({ id: CLASS_ID, name: 'Math', tutorId: OTHER_ID });
+      prisma.conversation.findFirst.mockResolvedValue(null);
+      prisma.conversation.create.mockResolvedValue({ id: CONV_ID });
+      prisma.classStudent.findMany.mockResolvedValue([]);
+    });
+
+    it('lets ADMIN open the chat of any class', async () => {
+      await service.createClassConversation(USER_ID, CLASS_ID, 'ADMIN');
+
+      expect(prisma.conversation.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('lets the class own tutor open it', async () => {
+      prisma.class.findUnique.mockResolvedValue({ id: CLASS_ID, name: 'Math', tutorId: USER_ID });
+
+      await service.createClassConversation(USER_ID, CLASS_ID, 'TUTOR');
+
+      expect(prisma.conversation.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('answers a tutor of another class with the same 404 as a missing class (no insert)', async () => {
+      const notFound = service.createClassConversation(USER_ID, CLASS_ID, 'TUTOR');
+      await expect(notFound).rejects.toThrow(new NotFoundException('Class not found'));
+
+      prisma.class.findUnique.mockResolvedValue(null);
+      await expect(service.createClassConversation(USER_ID, 'missing', 'TUTOR')).rejects.toThrow(
+        new NotFoundException('Class not found'),
+      );
+      expect(prisma.conversation.create).not.toHaveBeenCalled();
+    });
+
+    it('denies a STUDENT even when they are enrolled, with the same 404 (no insert)', async () => {
+      await expect(service.createClassConversation(USER_ID, CLASS_ID, 'STUDENT')).rejects.toThrow(
+        new NotFoundException('Class not found'),
+      );
+      expect(prisma.conversation.create).not.toHaveBeenCalled();
+    });
+
+    it('fails closed when the role is missing (no insert)', async () => {
+      prisma.class.findUnique.mockResolvedValue({ id: CLASS_ID, name: 'Math', tutorId: USER_ID });
+
+      await expect(service.createClassConversation(USER_ID, CLASS_ID)).rejects.toThrow(
+        new NotFoundException('Class not found'),
+      );
+      expect(prisma.conversation.create).not.toHaveBeenCalled();
     });
   });
 

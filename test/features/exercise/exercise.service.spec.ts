@@ -53,6 +53,7 @@ describe('ExerciseService', () => {
       findById: jest.fn(),
       findByStudentSession: jest.fn().mockResolvedValue(null),
       isParentOfStudent: jest.fn().mockResolvedValue(false),
+      isTutorOfStudentClass: jest.fn().mockResolvedValue(true),
       update: jest.fn(),
     };
     // parties hold the right roles: the tutor teaches, the student is a STUDENT
@@ -208,6 +209,110 @@ describe('ExerciseService', () => {
     });
   });
 
+  describe('TS-20 / grader role (exercise hardening)', () => {
+    const ISSUE = [{ name: 'de.pdf', url: 'https://x/de.pdf', key: 'de-key' }];
+
+    it('refuses a student submission with no session to a tutor who does not teach them', async () => {
+      repo.isTutorOfStudentClass.mockResolvedValue(false);
+
+      await expect(
+        service.createExerciseService({
+          userId: STUDENT_ID,
+          role: 'STUDENT',
+          data: { ...baseCreate, sessionId: null },
+        }),
+      ).rejects.toThrow(new ForbiddenException(ERROR_MESSAGES.EXERCISE_SUBMIT_NOT_ALLOWED));
+      expect(repo.isTutorOfStudentClass).toHaveBeenCalledWith({
+        tutorId: TUTOR_ID,
+        studentId: STUDENT_ID,
+      });
+      expect(repo.create).not.toHaveBeenCalled();
+    });
+
+    it('lets a student send a session-less submission to a tutor of an enrolled class', async () => {
+      repo.create.mockResolvedValue({ id: EXERCISE_ID });
+
+      await service.createExerciseService({
+        userId: STUDENT_ID,
+        role: 'STUDENT',
+        data: { ...baseCreate, sessionId: null },
+      });
+
+      expect(repo.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not run the class-link lookup for a tutor recording work for a student', async () => {
+      repo.create.mockResolvedValue({ id: EXERCISE_ID });
+
+      await service.createExerciseService({
+        userId: TUTOR_ID,
+        role: 'TUTOR',
+        data: { ...baseCreate, sessionId: null },
+      });
+
+      expect(repo.isTutorOfStudentClass).not.toHaveBeenCalled();
+    });
+
+    it('drops issueUrls sent by a student but keeps them when staff sets them', async () => {
+      repo.create.mockResolvedValue({ id: EXERCISE_ID });
+
+      await service.createExerciseService({
+        userId: STUDENT_ID,
+        role: 'STUDENT',
+        data: { ...baseCreate, sessionId: null, issueUrls: ISSUE },
+      });
+      expect(repo.create.mock.calls[0][0].data.issueUrls).toEqual([]);
+
+      await service.createExerciseService({
+        userId: TUTOR_ID,
+        role: 'TUTOR',
+        data: { ...baseCreate, sessionId: null, issueUrls: ISSUE },
+      });
+      expect(repo.create.mock.calls[1][0].data.issueUrls).toEqual(ISSUE);
+    });
+
+    it('denies grading to a user whose role is no longer TUTOR, even as the stored tutor', async () => {
+      repo.findById.mockResolvedValue({
+        id: EXERCISE_ID,
+        tutorId: TUTOR_ID,
+        studentId: STUDENT_ID,
+        status: 'SUBMITTED',
+      });
+
+      await expect(
+        service.gradeExerciseService({
+          userId: TUTOR_ID,
+          role: 'STUDENT',
+          id: EXERCISE_ID,
+          data: { score: 9 },
+        }),
+      ).rejects.toThrow(new ForbiddenException(ERROR_MESSAGES.EXERCISE_GRADE_NOT_ALLOWED));
+      await expect(
+        service.requestResubmitService({
+          userId: TUTOR_ID,
+          role: 'STUDENT',
+          id: EXERCISE_ID,
+          data: {},
+        }),
+      ).rejects.toThrow(new ForbiddenException(ERROR_MESSAGES.EXERCISE_GRADE_NOT_ALLOWED));
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('fails closed when the actor role is missing', async () => {
+      repo.findById.mockResolvedValue({
+        id: EXERCISE_ID,
+        tutorId: TUTOR_ID,
+        studentId: STUDENT_ID,
+        status: 'SUBMITTED',
+      });
+
+      await expect(
+        service.gradeExerciseService({ userId: TUTOR_ID, id: EXERCISE_ID, data: { score: 9 } }),
+      ).rejects.toThrow(ForbiddenException);
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+  });
+
   describe('getExercisesService', () => {
     it('lists exercises scoped to the acting user', async () => {
       repo.findAll.mockResolvedValue({ data: [], pagination: {} });
@@ -338,6 +443,7 @@ describe('ExerciseService', () => {
 
       await service.gradeExerciseService({
         userId: TUTOR_ID,
+        role: 'TUTOR',
         id: EXERCISE_ID,
         data: { score: 8.5, comment: 'tot' },
       });
@@ -382,6 +488,7 @@ describe('ExerciseService', () => {
 
       await service.gradeExerciseService({
         userId: TUTOR_ID,
+        role: 'TUTOR',
         id: EXERCISE_ID,
         data: { score: 10 },
       });

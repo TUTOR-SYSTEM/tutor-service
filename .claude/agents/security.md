@@ -58,8 +58,11 @@ services, repositories, guards, and schema changes.
 - **RPC responders** (`{name}.rpc.controller.ts`): the JWT guard only runs on the HTTP side —
   `gateway` authenticates the caller and forwards trusted `userId`/role in the payload, but the
   RPC handler must still call the *same* ownership-checking service method the HTTP controller
-  uses, not a shortcut that skips it. Also check `@UseFilters(RpcExceptionFilter)` is present
-  (an unfiltered exception can leak a stack trace back through `gateway`).
+  uses, not a shortcut that skips it. Check the handler validates its payload with
+  `parseRpcPayload` and the `rpc-payload.schema.ts` schema for that pattern (unvalidated fields reach
+  services otherwise). Check exceptions are filtered: `RpcExceptionFilter` is registered globally in
+  `main.ts` (or `@UseFilters` on the controller); an unfiltered exception can leak a stack trace back
+  through `gateway`.
 - **Other**: unbounded pagination `limit`, missing rate-limit on auth/reset flows, unsafe
   `onDelete` cascades, email/reset-token handling.
 

@@ -1,30 +1,33 @@
 import { Controller } from '@nestjs/common';
 import { MessagePattern, Payload } from '@nestjs/microservices';
-import type {
-  AddStudentsDto,
-  CreateClassDto,
-  GetClassesQueryDto,
-  UpdateClassDto,
-} from '@packages/entities/class';
+import {
+  classAddStudentsPayloadSchema,
+  classCreatePayloadSchema,
+  classGetAllPayloadSchema,
+  classIdPayloadSchema,
+  classRemoveStudentPayloadSchema,
+  classUpdatePayloadSchema,
+} from '@packages/entities/rpc';
+import { parseRpcPayload } from '@packages/pipes';
 import { ClassService } from './class.service';
 
 /**
  * Message-pattern mirror of `ClassController` — reached only by the gateway's `TUTOR_SERVICE`
- * `ClientProxy` over RabbitMQ. Delegates to the same, unmodified
- * `ClassService` the HTTP controller uses; no business logic lives here.
+ * `ClientProxy` over RabbitMQ. Validates the payload (`rpc-payload.schema.ts`) and delegates to
+ * the same, unmodified `ClassService` the HTTP controller uses; no business logic lives here.
  */
 @Controller()
 export class ClassRpcController {
   constructor(private readonly classService: ClassService) {}
 
   @MessagePattern('class.create')
-  create(@Payload() payload: { data: CreateClassDto; userId: string }) {
-    return this.classService.createClassService(payload);
+  create(@Payload() payload: unknown) {
+    return this.classService.createClassService(parseRpcPayload(classCreatePayloadSchema, payload));
   }
 
   @MessagePattern('class.update')
-  update(@Payload() payload: { userId: string; role?: string; id: string; data: UpdateClassDto }) {
-    return this.classService.updateClassService(payload);
+  update(@Payload() payload: unknown) {
+    return this.classService.updateClassService(parseRpcPayload(classUpdatePayloadSchema, payload));
   }
 
   @MessagePattern('class.generateCode')
@@ -34,46 +37,48 @@ export class ClassRpcController {
   }
 
   @MessagePattern('class.getAll')
-  getAll(@Payload() payload: { userId: string; role?: string; query: GetClassesQueryDto }) {
-    return this.classService.getClassesService(payload);
+  getAll(@Payload() payload: unknown) {
+    return this.classService.getClassesService(parseRpcPayload(classGetAllPayloadSchema, payload));
   }
 
   @MessagePattern('class.getById')
-  getById(@Payload() payload: { userId: string; role?: string; id: string }) {
-    return this.classService.getClassService(payload);
+  getById(@Payload() payload: unknown) {
+    return this.classService.getClassService(parseRpcPayload(classIdPayloadSchema, payload));
   }
 
   @MessagePattern('class.addStudents')
-  addStudents(
-    @Payload() payload: { userId: string; role?: string; classId: string; data: AddStudentsDto },
-  ) {
-    return this.classService.addStudentsService(payload);
+  addStudents(@Payload() payload: unknown) {
+    return this.classService.addStudentsService(
+      parseRpcPayload(classAddStudentsPayloadSchema, payload),
+    );
   }
 
   @MessagePattern('class.removeStudent')
-  removeStudent(
-    @Payload() payload: { userId: string; role?: string; classId: string; studentId: string },
-  ) {
-    return this.classService.removeStudentService(payload);
+  removeStudent(@Payload() payload: unknown) {
+    return this.classService.removeStudentService(
+      parseRpcPayload(classRemoveStudentPayloadSchema, payload),
+    );
   }
 
   @MessagePattern('class.getStudents')
-  getStudents(@Payload() payload: { userId: string; role?: string; id: string }) {
-    return this.classService.getAllStudentsService(payload);
+  getStudents(@Payload() payload: unknown) {
+    return this.classService.getAllStudentsService(parseRpcPayload(classIdPayloadSchema, payload));
   }
 
   @MessagePattern('class.getMaterials')
-  getMaterials(@Payload() payload: { userId: string; role?: string; id: string }) {
-    return this.classService.getClassMaterialsService(payload);
+  getMaterials(@Payload() payload: unknown) {
+    return this.classService.getClassMaterialsService(
+      parseRpcPayload(classIdPayloadSchema, payload),
+    );
   }
 
   @MessagePattern('class.getWatch')
-  getWatch(@Payload() payload: { userId: string; role?: string; id: string }) {
-    return this.classService.getClassWatchService(payload);
+  getWatch(@Payload() payload: unknown) {
+    return this.classService.getClassWatchService(parseRpcPayload(classIdPayloadSchema, payload));
   }
 
   @MessagePattern('class.delete')
-  del(@Payload() payload: { userId: string; role?: string; id: string }) {
-    return this.classService.delClassService(payload);
+  del(@Payload() payload: unknown) {
+    return this.classService.delClassService(parseRpcPayload(classIdPayloadSchema, payload));
   }
 }

@@ -133,7 +133,9 @@ describe('ExerciseRepository', () => {
 
   describe('findAll', () => {
     const baseQuery = { page: 2, limit: 5 } as never;
-    const access = { OR: [{ tutorId: USER_ID }, { studentId: USER_ID }, { student: { parentId: USER_ID } }] };
+    const access = {
+      OR: [{ tutorId: USER_ID }, { studentId: USER_ID }, { student: { parentId: USER_ID } }],
+    };
 
     it('returns rows with nested session/class/student and pagination', async () => {
       prisma.exercise.count.mockResolvedValue(7);
@@ -231,6 +233,62 @@ describe('ExerciseRepository', () => {
       expect(prisma.exercise.count).toHaveBeenCalledWith({
         where: { AND: [access, { session: { classId: CLASS_ID } }] },
       });
+    });
+  });
+
+  describe('canAccessFile (TS-26 exact JSON element match)', () => {
+    it('matches the key as a whole JSON element via containment, not a text substring', async () => {
+      prisma.$queryRaw.mockResolvedValue([{ ok: true }]);
+
+      await expect(
+        repo.canAccessFile({ key: 'files/a.pdf', userId: USER_ID, role: 'TUTOR' }),
+      ).resolves.toBe(true);
+
+      const [strings, ...values] = prisma.$queryRaw.mock.calls[0] as [
+        TemplateStringsArray,
+        ...unknown[],
+      ];
+      const sql = Array.from(strings).join('?');
+      expect(sql).not.toMatch(/position\s*\(/i);
+      expect(sql).not.toMatch(/\bLIKE\b/i);
+      expect(sql).toContain("@> jsonb_build_array(jsonb_build_object('key', ");
+      expect(values).toContain('files/a.pdf');
+    });
+
+    it('returns false when the query finds no related row', async () => {
+      prisma.$queryRaw.mockResolvedValue([{ ok: false }]);
+
+      await expect(
+        repo.canAccessFile({ key: 'x', userId: USER_ID, role: 'STUDENT' }),
+      ).resolves.toBe(false);
+    });
+
+    it('lets ADMIN through without querying', async () => {
+      await expect(repo.canAccessFile({ key: 'x', userId: USER_ID, role: 'ADMIN' })).resolves.toBe(
+        true,
+      );
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('isTutorOfStudentClass (TS-20 class link)', () => {
+    it('is true when the tutor owns a class the student is enrolled in', async () => {
+      prisma.classStudent.count.mockResolvedValue(1);
+
+      await expect(
+        repo.isTutorOfStudentClass({ tutorId: USER_ID, studentId: STUDENT_ID }),
+      ).resolves.toBe(true);
+      expect(prisma.classStudent.count).toHaveBeenCalledWith({
+        where: { studentId: STUDENT_ID, class: { tutorId: USER_ID } },
+      });
+    });
+
+    it('is false when no shared class exists', async () => {
+      prisma.classStudent.count.mockResolvedValue(0);
+
+      await expect(
+        repo.isTutorOfStudentClass({ tutorId: USER_ID, studentId: STUDENT_ID }),
+      ).resolves.toBe(false);
     });
   });
 

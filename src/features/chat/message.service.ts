@@ -61,9 +61,17 @@ export class MessageService {
     return newMessage;
   }
 
-  async updateMessageStatus(messageId: string, status: 'DELIVERED' | 'READ') {
+  // scoped to the conversation: a socket may only touch messages of a conversation it is in
+  async updateMessageStatus(
+    messageId: string,
+    status: 'DELIVERED' | 'READ',
+    conversationId: string,
+  ) {
     try {
-      return await this.prisma.message.update({ where: { id: messageId }, data: { status } });
+      return await this.prisma.message.update({
+        where: { id: messageId, conversationId },
+        data: { status },
+      });
     } catch (error) {
       if (isRecordNotFound(error)) return undefined;
       throw error;

@@ -1,53 +1,56 @@
 import { Controller } from '@nestjs/common';
 import { MessagePattern, Payload } from '@nestjs/microservices';
-import type {
-  CreateChapterDto,
-  GetChaptersQueryDto,
-  UpdateChapterDto,
-} from '@packages/entities/curriculum';
+import {
+  chapterCreatePayloadSchema,
+  chapterDeletePayloadSchema,
+  chapterGetAllPayloadSchema,
+  chapterIdPayloadSchema,
+  chapterUpdatePayloadSchema,
+} from '@packages/entities/rpc';
+import { parseRpcPayload } from '@packages/pipes';
 import { ChapterService } from './chapter.service';
 
 /**
  * Message-pattern mirror of `ChapterController` — reached only by the gateway's `TUTOR_SERVICE`
- * `ClientProxy` over RabbitMQ. Delegates to the same, unmodified
- * `ChapterService` the HTTP controller uses; no business logic lives here.
+ * `ClientProxy` over RabbitMQ. Validates the payload (`rpc-payload.schema.ts`) and delegates to
+ * the same, unmodified `ChapterService` the HTTP controller uses; no business logic lives here.
  */
 @Controller()
 export class ChapterRpcController {
   constructor(private readonly chapterService: ChapterService) {}
 
   @MessagePattern('chapter.create')
-  create(
-    @Payload()
-    payload: {
-      userId: string;
-      role?: string;
-      curriculumId: string;
-      data: CreateChapterDto;
-    },
-  ) {
-    return this.chapterService.createChapterService(payload);
+  create(@Payload() payload: unknown) {
+    return this.chapterService.createChapterService(
+      parseRpcPayload(chapterCreatePayloadSchema, payload),
+    );
   }
 
   @MessagePattern('chapter.getAll')
-  getAll(@Payload() payload: { query: GetChaptersQueryDto }) {
-    return this.chapterService.getAllChaptersService(payload);
+  getAll(@Payload() payload: unknown) {
+    return this.chapterService.getAllChaptersService(
+      parseRpcPayload(chapterGetAllPayloadSchema, payload),
+    );
   }
 
   @MessagePattern('chapter.getById')
-  getById(@Payload() payload: { id: string }) {
-    return this.chapterService.getChapterByIdService(payload);
+  getById(@Payload() payload: unknown) {
+    return this.chapterService.getChapterByIdService(
+      parseRpcPayload(chapterIdPayloadSchema, payload),
+    );
   }
 
   @MessagePattern('chapter.update')
-  update(
-    @Payload() payload: { userId: string; role?: string; id: string; data: UpdateChapterDto },
-  ) {
-    return this.chapterService.updateChapterService(payload);
+  update(@Payload() payload: unknown) {
+    return this.chapterService.updateChapterService(
+      parseRpcPayload(chapterUpdatePayloadSchema, payload),
+    );
   }
 
   @MessagePattern('chapter.delete')
-  del(@Payload() payload: { userId: string; role?: string; id: string }) {
-    return this.chapterService.deleteChapterService(payload);
+  del(@Payload() payload: unknown) {
+    return this.chapterService.deleteChapterService(
+      parseRpcPayload(chapterDeletePayloadSchema, payload),
+    );
   }
 }

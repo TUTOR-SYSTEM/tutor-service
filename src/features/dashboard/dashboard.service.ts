@@ -76,12 +76,12 @@ export class DashboardService {
     if (!userId || !checkUuidValid({ data: userId }))
       throw new BadRequestException(ERROR_MESSAGES.USER_ID_MUST_BE_UUID);
 
-    let role = requestedRole;
-    if (!role) {
-      const user = await this.userService.getUserRoleById(userId);
-      if (!user) throw new NotFoundException(ERROR_MESSAGES.USER_NOT_FOUND);
-      role = user.role ?? 'STUDENT';
-    }
+    // The actor's role comes from the users table; a requested role (e.g. a role the caller
+    // claims) only overrides it when the actor really is ADMIN.
+    const actor = await this.userService.getUserRoleById(userId);
+    if (!actor) throw new NotFoundException(ERROR_MESSAGES.USER_NOT_FOUND);
+    const actorRole = actor.role ?? 'STUDENT';
+    const role = actorRole === 'ADMIN' && requestedRole ? requestedRole : actorRole;
     const isStudent = role === 'STUDENT';
 
     const scope = isStudent

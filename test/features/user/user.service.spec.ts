@@ -13,16 +13,42 @@ describe('UserService', () => {
   });
 
   describe('getUserByField', () => {
-    it.each(['id', 'email', 'username', 'phone', 'userCode'] as const)(
-      'filters by %s using the matching column',
+    it('looks a user up by id and selects only the non-secret columns', async () => {
+      const row = {
+        id: USER_ID,
+        firstName: 'An',
+        lastName: 'Nguyen',
+        role: 'STUDENT',
+        tutorId: null,
+      };
+      prisma.user.findMany.mockResolvedValue([row]);
+
+      const result = await service.getUserByField({ field: 'id', value: USER_ID });
+
+      expect(prisma.user.findMany).toHaveBeenCalledWith({
+        where: { id: USER_ID },
+        select: { id: true, firstName: true, lastName: true, role: true, tutorId: true },
+      });
+      expect(result).toEqual([row]);
+    });
+
+    it('never selects the password column', async () => {
+      prisma.user.findMany.mockResolvedValue([]);
+
+      await service.getUserByField({ field: 'id', value: USER_ID });
+
+      const args = prisma.user.findMany.mock.calls[0][0] as { select: Record<string, boolean> };
+      expect(args.select).toBeDefined();
+      expect(args.select).not.toHaveProperty('password');
+    });
+
+    it.each(['email', 'username', 'phone', 'userCode'])(
+      'refuses to look up by %s (not needed by any caller, and enumerable)',
       async (field) => {
-        const row = { id: USER_ID };
-        prisma.user.findMany.mockResolvedValue([row]);
+        const result = await service.getUserByField({ field: field as never, value: 'x' });
 
-        const result = await service.getUserByField({ field, value: 'the-value' });
-
-        expect(prisma.user.findMany).toHaveBeenCalledWith({ where: { [field]: 'the-value' } });
-        expect(result).toEqual([row]);
+        expect(result).toEqual([]);
+        expect(prisma.user.findMany).not.toHaveBeenCalled();
       },
     );
 
@@ -39,9 +65,7 @@ describe('UserService', () => {
     it('returns an empty list when no row matches', async () => {
       prisma.user.findMany.mockResolvedValue([]);
 
-      await expect(
-        service.getUserByField({ field: 'email', value: 'none@x.dev' }),
-      ).resolves.toEqual([]);
+      await expect(service.getUserByField({ field: 'id', value: USER_ID })).resolves.toEqual([]);
     });
 
     it('propagates database errors to the caller', async () => {

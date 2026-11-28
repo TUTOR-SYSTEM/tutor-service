@@ -1,16 +1,19 @@
 import { Controller } from '@nestjs/common';
 import { MessagePattern, Payload } from '@nestjs/microservices';
-import type {
-  CreateCurriculumDto,
-  GetCurriculumsQueryDto,
-  UpdateCurriculumDto,
-} from '@packages/entities/curriculum';
+import {
+  curriculumCreatePayloadSchema,
+  curriculumGenerateCodePayloadSchema,
+  curriculumGetAllPayloadSchema,
+  curriculumIdPayloadSchema,
+  curriculumUpdatePayloadSchema,
+} from '@packages/entities/rpc';
+import { parseRpcPayload } from '@packages/pipes';
 import { CurriculumService } from './curriculum.service';
 
 /**
  * Message-pattern mirror of `CurriculumController` — reached only by the gateway's `TUTOR_SERVICE`
- * `ClientProxy` over RabbitMQ. Delegates to the same, unmodified
- * `CurriculumService` the HTTP controller uses; no business logic lives here.
+ * `ClientProxy` over RabbitMQ. Validates the payload (`rpc-payload.schema.ts`) and delegates to
+ * the same, unmodified `CurriculumService` the HTTP controller uses; no business logic lives here.
  */
 @Controller()
 export class CurriculumRpcController {
@@ -18,36 +21,43 @@ export class CurriculumRpcController {
 
   @MessagePattern('curriculum.generateCode')
   // replies with the bare code string (CONTRACT C4) — the UI reads it as a string
-  generateCode(@Payload() payload?: { subject?: string }) {
-    return this.curriculumService.generateNewCodeService(payload?.subject);
+  generateCode(@Payload() payload?: unknown) {
+    const parsed = parseRpcPayload(curriculumGenerateCodePayloadSchema, payload);
+    return this.curriculumService.generateNewCodeService(parsed?.subject);
   }
 
   @MessagePattern('curriculum.create')
-  create(
-    @Payload() payload: { userId: string; role?: string; createCurriculum: CreateCurriculumDto },
-  ) {
-    return this.curriculumService.createCurriculumService(payload);
+  create(@Payload() payload: unknown) {
+    return this.curriculumService.createCurriculumService(
+      parseRpcPayload(curriculumCreatePayloadSchema, payload),
+    );
   }
 
   @MessagePattern('curriculum.getAll')
-  getAll(@Payload() payload: { userId: string; role?: string; query: GetCurriculumsQueryDto }) {
-    return this.curriculumService.getAllCurriculumService(payload);
+  getAll(@Payload() payload: unknown) {
+    return this.curriculumService.getAllCurriculumService(
+      parseRpcPayload(curriculumGetAllPayloadSchema, payload),
+    );
   }
 
   @MessagePattern('curriculum.getById')
-  getById(@Payload() payload: { userId: string; role?: string; id: string }) {
-    return this.curriculumService.getCurriculumByIdService(payload);
+  getById(@Payload() payload: unknown) {
+    return this.curriculumService.getCurriculumByIdService(
+      parseRpcPayload(curriculumIdPayloadSchema, payload),
+    );
   }
 
   @MessagePattern('curriculum.update')
-  update(
-    @Payload() payload: { userId: string; role?: string; id: string; data: UpdateCurriculumDto },
-  ) {
-    return this.curriculumService.updateCurriculumService(payload);
+  update(@Payload() payload: unknown) {
+    return this.curriculumService.updateCurriculumService(
+      parseRpcPayload(curriculumUpdatePayloadSchema, payload),
+    );
   }
 
   @MessagePattern('curriculum.delete')
-  del(@Payload() payload: { userId: string; role?: string; id: string }) {
-    return this.curriculumService.deleteCurriculumService(payload);
+  del(@Payload() payload: unknown) {
+    return this.curriculumService.deleteCurriculumService(
+      parseRpcPayload(curriculumIdPayloadSchema, payload),
+    );
   }
 }

@@ -304,4 +304,78 @@ describe('SessionRepository', () => {
       expect(prisma.classSession.deleteMany).toHaveBeenCalledWith({ where: { id: SESSION_ID } });
     });
   });
+
+  describe('updateWithHomework (TS-02 single write)', () => {
+    it('writes the status and the ASSIGNED rows inside one transaction', async () => {
+      prisma.classSession.update.mockResolvedValue({ id: SESSION_ID, status: 'COMPLETED' });
+      prisma.exercise.createMany.mockResolvedValue({ count: 1 });
+
+      const result = await repo.updateWithHomework({
+        id: SESSION_ID,
+        data: { status: 'COMPLETED' } as never,
+        homework: { tutorId: USER_ID, studentIds: [STUDENT_ID] },
+      });
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(prisma.classSession.update).toHaveBeenCalledWith({
+        where: { id: SESSION_ID },
+        data: expect.objectContaining({ status: 'COMPLETED' }),
+      });
+      expect(prisma.exercise.createMany).toHaveBeenCalledWith({
+        data: [
+          {
+            sessionId: SESSION_ID,
+            tutorId: USER_ID,
+            studentId: STUDENT_ID,
+            status: 'ASSIGNED',
+            exerciseUrls: [],
+          },
+        ],
+        skipDuplicates: true,
+      });
+      expect(result).toEqual({ id: SESSION_ID, status: 'COMPLETED' });
+    });
+
+    it('writes no exercise rows when there is no homework to assign', async () => {
+      prisma.classSession.update.mockResolvedValue({ id: SESSION_ID });
+
+      await repo.updateWithHomework({
+        id: SESSION_ID,
+        data: { status: 'COMPLETED' } as never,
+        homework: null,
+      });
+
+      expect(prisma.exercise.createMany).not.toHaveBeenCalled();
+    });
+
+    it('returns null and writes no rows when the session is missing (rolls back)', async () => {
+      prisma.classSession.update.mockRejectedValue(notFound());
+
+      await expect(
+        repo.updateWithHomework({
+          id: SESSION_ID,
+          data: { status: 'COMPLETED' } as never,
+          homework: { tutorId: USER_ID, studentIds: [STUDENT_ID] },
+        }),
+      ).resolves.toBeNull();
+      expect(prisma.exercise.createMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('hasSubmittedExercises (TS-02 tutor lock)', () => {
+    it('counts only rows past ASSIGNED', async () => {
+      prisma.exercise.count.mockResolvedValue(1);
+
+      await expect(repo.hasSubmittedExercises({ sessionId: SESSION_ID })).resolves.toBe(true);
+      expect(prisma.exercise.count).toHaveBeenCalledWith({
+        where: { sessionId: SESSION_ID, status: { not: 'ASSIGNED' } },
+      });
+    });
+
+    it('is false when every row is still ASSIGNED or there are none', async () => {
+      prisma.exercise.count.mockResolvedValue(0);
+
+      await expect(repo.hasSubmittedExercises({ sessionId: SESSION_ID })).resolves.toBe(false);
+    });
+  });
 });

@@ -137,7 +137,7 @@ describe('TuitionRepository', () => {
     it('falls back to amount "0" when the stored amount is null', async () => {
       prisma.tuition.findFirst.mockResolvedValue(row({ amount: null }));
 
-      const result = await repo.findById(TUITION_ID);
+      const result = await repo.findById(TUITION_ID, USER_ID);
 
       expect(result?.amount).toBe('0');
     });
@@ -147,7 +147,7 @@ describe('TuitionRepository', () => {
     it('returns null when the tuition does not exist', async () => {
       prisma.tuition.findFirst.mockResolvedValue(null);
 
-      await expect(repo.findById(TUITION_ID)).resolves.toBeNull();
+      await expect(repo.findById(TUITION_ID, USER_ID)).resolves.toBeNull();
     });
 
     it('adds the read-access rule when a userId is given', async () => {
@@ -160,14 +160,13 @@ describe('TuitionRepository', () => {
       );
     });
 
-    it('does not add the access rule when no userId is given', async () => {
+    it('never reads unscoped when no userId is given (returns null, no query)', async () => {
       prisma.tuition.findFirst.mockResolvedValue(row());
 
-      await repo.findById(TUITION_ID);
+      const result = await repo.findById(TUITION_ID, undefined as unknown as string);
 
-      expect(prisma.tuition.findFirst).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id: TUITION_ID } }),
-      );
+      expect(result).toBeNull();
+      expect(prisma.tuition.findFirst).not.toHaveBeenCalled();
     });
   });
 

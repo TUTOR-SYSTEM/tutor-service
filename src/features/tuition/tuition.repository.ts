@@ -57,7 +57,7 @@ export class TuitionRepository {
         note: data.note ?? null,
       },
     });
-    return this.findById(tuition.id);
+    return this.findRowUnscoped(tuition.id);
   }
 
   async findAll({
@@ -92,11 +92,19 @@ export class TuitionRepository {
   }
 
   /** When `userId` is given the row is only returned if that user may read it. */
-  async findById(id: string, userId?: string, role?: string | null) {
+  /** Read one tuition as `userId` (student, tutor of its class, or admin). Always scoped. */
+  async findById(id: string, userId: string, role?: string | null) {
+    if (!userId) return null;
     const row = await this.prisma.tuition.findFirst({
-      where: { id, ...(userId && this.canRead(userId, role)) },
+      where: { id, ...this.canRead(userId, role) },
       include: TUITION_INCLUDE,
     });
+    return row ? this.serialize(row) : null;
+  }
+
+  /** Unscoped re-read used only right after a write this repository just performed. */
+  private async findRowUnscoped(id: string) {
+    const row = await this.prisma.tuition.findFirst({ where: { id }, include: TUITION_INCLUDE });
     return row ? this.serialize(row) : null;
   }
 
@@ -118,7 +126,7 @@ export class TuitionRepository {
       if (isRecordNotFound(error)) return null;
       throw error;
     }
-    return this.findById(id);
+    return this.findRowUnscoped(id);
   }
 
   async isStudentEnrolled({ classId, studentId }: { classId: string; studentId: string }) {

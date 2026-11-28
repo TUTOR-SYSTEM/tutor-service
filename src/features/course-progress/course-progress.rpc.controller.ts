@@ -1,9 +1,13 @@
-import { Controller } from '@nestjs/common';
+import { BadRequestException, Controller } from '@nestjs/common';
 import { MessagePattern, Payload } from '@nestjs/microservices';
-import type { CourseProgressSnapshot } from '@packages/entities/course-progress';
+import {
+  courseProgressSyncSchema,
+  type CourseProgressSnapshot,
+} from '@packages/entities/course-progress';
+import { ERROR_MESSAGES } from '../../data/constants';
 import { CourseProgressService } from './course-progress.service';
 
-/** Message-pattern cho gateway (RMQ). Không có logic ở đây, chỉ gọi service. */
+/** Message-pattern cho gateway (RMQ). Chỉ validate payload rồi gọi service. */
 @Controller()
 export class CourseProgressRpcController {
   constructor(private readonly service: CourseProgressService) {}
@@ -15,6 +19,8 @@ export class CourseProgressRpcController {
 
   @MessagePattern('courseProgress.sync')
   sync(@Payload() payload: { userId: string; data: CourseProgressSnapshot }) {
-    return this.service.sync(payload);
+    const parsed = courseProgressSyncSchema.safeParse(payload);
+    if (!parsed.success) throw new BadRequestException(ERROR_MESSAGES.COURSE_PROGRESS_INVALID);
+    return this.service.sync(parsed.data);
   }
 }

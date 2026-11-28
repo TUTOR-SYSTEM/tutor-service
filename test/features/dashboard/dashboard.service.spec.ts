@@ -139,13 +139,22 @@ describe('DashboardService', () => {
   });
 
   describe('role resolution', () => {
-    it('uses the role the gateway forwarded from the JWT and skips the role query', async () => {
+    it('ignores a requested role from a non-ADMIN actor and scopes by the actor role', async () => {
       user.getUserRoleById.mockResolvedValue({ id: USER_ID, role: 'TUTOR' });
 
       await service.getOverview(USER_ID, 'STUDENT');
 
-      expect(user.getUserRoleById).not.toHaveBeenCalled();
+      expect(repo.tutorClassScope).toHaveBeenCalledWith(USER_ID);
+      expect(repo.studentClassScope).not.toHaveBeenCalled();
+    });
+
+    it('honours the requested role when the actor is ADMIN', async () => {
+      user.getUserRoleById.mockResolvedValue({ id: USER_ID, role: 'ADMIN' });
+
+      await service.getOverview(USER_ID, 'STUDENT');
+
       expect(repo.studentClassScope).toHaveBeenCalledWith(USER_ID);
+      expect(repo.tutorClassScope).not.toHaveBeenCalled();
     });
 
     it('looks the role up when the caller does not pass one', async () => {

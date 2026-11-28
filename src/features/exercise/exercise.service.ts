@@ -44,6 +44,13 @@ export class ExerciseService {
     return { ...item, answerKeyUrls: [] };
   }
 
+  // grading is the tutor's job: a TUTOR who owns the row, or ADMIN. The role check stops a user
+  // whose role changed (e.g. to STUDENT) from keeping grading rights through a stale tutorId.
+  private canGrade({ userId, role }: { userId: string; role?: string | null }, tutorId: string) {
+    if (isAdminRole(role)) return true;
+    return role === 'TUTOR' && canActOnOwned({ userId, role }, tutorId);
+  }
+
   private assertUuid(value: string | null | undefined, label: string) {
     if (!value || !checkUuidValid({ data: value })) {
       throw new BadRequestException(`${ERROR_MESSAGES.ID_MUST_BE_UUID}: ${label}`);
@@ -197,6 +204,22 @@ export class ExerciseService {
     }
 
     await this.assertParties(data.tutorId, data.studentId);
+
+    // a student may only send work to a tutor of a class they attend. With a session the session
+    // check below enforces this; without one nothing else would.
+    const actorIsStudent = !isAdminRole(role) && userId === data.studentId;
+    if (actorIsStudent && !data.sessionId) {
+      const teaches = await this.repo.isTutorOfStudentClass({
+        tutorId: data.tutorId,
+        studentId: userId,
+      });
+      if (!teaches) throw new ForbiddenException(ERROR_MESSAGES.EXERCISE_SUBMIT_NOT_ALLOWED);
+    }
+    // only staff (TUTOR/ADMIN) set the issue sheet; a student's copy of issueUrls is dropped
+    const isStaff = isAdminRole(role) || role === 'TUTOR';
+    const payload =
+      !isStaff && data.issueUrls && data.issueUrls.length > 0 ? { ...data, issueUrls: [] } : data;
+
     await this.resolveRefs({ userId, role, sessionId: data.sessionId, lessonId: data.lessonId });
 
     // The grader must be the tutor of the session's class, and the student must be enrolled in
@@ -245,7 +268,7 @@ export class ExerciseService {
       }
     }
 
-    const created = await this.repo.create({ data: { ...data, status: 'SUBMITTED' } });
+    const created = await this.repo.create({ data: { ...payload, status: 'SUBMITTED' } });
     await this.notifyTutorOfSubmission({ userId, role, exercise: created });
     return this.hideAnswerKey(created, { userId, role });
   }
@@ -343,7 +366,7 @@ export class ExerciseService {
 
     const found = await this.repo.findById({ id });
     if (!found) throw new NotFoundException(ERROR_MESSAGES.EXERCISE_NOT_FOUND);
-    if (!canActOnOwned({ userId, role }, found.tutorId)) {
+    if (!this.canGrade({ userId, role }, found.tutorId)) {
       throw new ForbiddenException(ERROR_MESSAGES.EXERCISE_GRADE_NOT_ALLOWED);
     }
     if (found.status === 'ASSIGNED') {
@@ -394,7 +417,7 @@ export class ExerciseService {
 
     const found = await this.repo.findById({ id });
     if (!found) throw new NotFoundException(ERROR_MESSAGES.EXERCISE_NOT_FOUND);
-    if (!canActOnOwned({ userId, role }, found.tutorId)) {
+    if (!this.canGrade({ userId, role }, found.tutorId)) {
       throw new ForbiddenException(ERROR_MESSAGES.EXERCISE_GRADE_NOT_ALLOWED);
     }
     if (found.status === 'ASSIGNED') {

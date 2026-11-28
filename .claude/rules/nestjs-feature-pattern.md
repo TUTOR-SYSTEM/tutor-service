@@ -11,7 +11,12 @@ this is now an education / tutoring domain.)
   is realtime via `chat.gateway.ts`) also has a `{name}.rpc.controller.ts` —
   `@UseFilters(RpcExceptionFilter)` (`@packages/filters`), one
   `@MessagePattern('<feature>.<methodName>')` per gateway call, delegating to the *same*
-  `*Service` the HTTP controller uses. See `../../../.claude/rules/architecture.md` for the
+  `*Service` the HTTP controller uses. Each handler first validates its payload with
+  `parseRpcPayload(<schema>, payload)` (`@packages/pipes`) against the schema for that pattern in
+  `src/packages/entities/rpc/rpc-payload.schema.ts` (add one there for a new pattern; `userId` must be
+  a UUID). The RPC identity seal (`sealRpcIdentity`/`verifyRpcIdentity`) is checked by
+  `RpcIdentityInterceptor`, which also rejects replayed envelopes (`RpcReplayGuard`, counted in
+  third-service's `redis.incr`, shared by all replicas). See `../../../.claude/rules/architecture.md` for the
   cross-repo RPC contract and the `add-rpc-endpoint` skill for adding a new pattern.
 - **Entities live separately** under `src/packages/entities/{domain}/` as
   `{domain}.schema.ts` (Zod), `{domain}.dto.ts` (inferred types), and `index.ts` (barrel).
@@ -132,6 +137,8 @@ this is now an education / tutoring domain.)
 - **Exercise status lifecycle**: `ASSIGNED` (created by session completion, not yet submitted) →
   `SUBMITTED` → `GRADED`; a tutor may set `RESUBMIT` (student re-submits through the submit
   endpoint, not `create`). Grade rejects `ASSIGNED` rows (`EXERCISE_NOT_SUBMITTED`).
+- **Tutor/parent link writes** (`users.tutor_id`, `users.parent_id`): tutor-service does not write them. Class flow calls `UserLinkClient` (`src/features/class/user-link.client.ts`) → user-service `user.linkStudentsToTutor` / `user.releaseStudentParent`, sent as the acting user (signed like the gateway, `src/packages/helpers/user-actor.helper.ts`). user-service derives the tutor from the class row, never from the payload. Do not add direct `users` writes in tutor-service.
+- **RabbitMQ identity per service**: each service connects as its own broker user (`gateway_svc`, `user_svc`, `tutor_svc`, `third_svc`), granted by `docker/rabbitmq/init-acl.mjs`. Never put `RABBITMQ_URL` in a shared compose anchor (gateway's `x-infra-env` merges into every service), set it per service.
 - **`src/features/user/*`** is a deliberate exception too — a read-only lookup (`getUserByField`)
   against the shared `users` table (this DB and `user`'s DB are the same Postgres instance).
   No controller, no `.rpc.controller.ts`, not a domain feature — don't add write methods or a

@@ -1,9 +1,18 @@
-import { Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable } from '@nestjs/common';
 import {
   PaymentSettingsData,
   TeachingSettingsData,
   TutorSettingsRepository,
 } from './tutor-settings.repository';
+
+/** Roles allowed to change payment/teaching settings (TS-19). Exact match; fail closed. */
+const SETTINGS_WRITE_ROLES: ReadonlySet<string> = new Set(['TUTOR', 'ADMIN']);
+
+function assertSettingsWriter(role: string | undefined): void {
+  if (role === undefined || !SETTINGS_WRITE_ROLES.has(role)) {
+    throw new ForbiddenException('FORBIDDEN_ROLE');
+  }
+}
 
 /** Mặc định khi gia sư chưa khai báo tài khoản nhận tiền. */
 export const DEFAULT_PAYMENT_SETTINGS: PaymentSettingsData = {
@@ -50,11 +59,14 @@ export class TutorSettingsService {
 
   async updateTeachingSettingsService({
     userId,
+    role,
     data,
   }: {
     userId: string;
+    role?: string;
     data: TeachingSettingsData;
   }): Promise<TeachingSettingsData> {
+    assertSettingsWriter(role);
     await this.repo.upsert({ tutorId: userId, data });
     return data;
   }
@@ -74,11 +86,14 @@ export class TutorSettingsService {
 
   async updatePaymentSettingsService({
     userId,
+    role,
     data,
   }: {
     userId: string;
+    role?: string;
     data: PaymentSettingsData;
   }): Promise<PaymentSettingsData> {
+    assertSettingsWriter(role);
     // số tài khoản lưu dạng liền, không khoảng trắng
     const normalized = { ...data, accountNumber: data.accountNumber.replace(/\s/g, '') };
     await this.repo.upsertPayment({ tutorId: userId, data: normalized });

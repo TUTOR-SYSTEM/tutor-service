@@ -103,6 +103,10 @@ export const ERROR_TRANSLATIONS = {
 
   // UUID
   USER_ID_MUST_BE_UUID: { vi: 'ID người dùng phải là UUID', en: 'User Id must be uuid' },
+  COURSE_PROGRESS_INVALID: {
+    vi: 'Dữ liệu tiến độ học không hợp lệ',
+    en: 'Invalid course progress data',
+  },
   CLASS_ID_MUST_BE_UUID: { vi: 'ID lớp học phải là UUID', en: 'Class Id must be uuid' },
   SCHEDULE_ID_MUST_BE_UUID: { vi: 'ID lịch học phải là UUID', en: 'Schedule Id must be uuid' },
   SESSION_ID_MUST_BE_UUID: { vi: 'ID buổi học phải là UUID', en: 'Session Id must be uuid' },
@@ -171,6 +175,10 @@ export const ERROR_TRANSLATIONS = {
   EXERCISE_ALREADY_SUBMITTED: {
     vi: 'Bài tập đã được nộp cho buổi học này',
     en: 'Exercise already submitted for this session',
+  },
+  SESSION_TUTOR_LOCKED: {
+    vi: 'Không thể đổi gia sư của buổi học đã có bài nộp',
+    en: 'Cannot change the tutor of a session that already has submitted exercises',
   },
   EXERCISE_NOT_SUBMITTED: {
     vi: 'Học sinh chưa nộp bài tập — không thể chấm',

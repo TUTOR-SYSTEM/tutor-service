@@ -19,6 +19,7 @@ import {
 import { canActOnOwned, checkUuidValid, generateCode } from '@packages/helpers';
 import { UserService } from '../user/user.service';
 import { NotificationNotifier } from '../notification/notification.notifier';
+import { UserLinkClient } from './user-link.client';
 import { ERROR_MESSAGES } from 'src/data/constants';
 
 /** Sĩ số mặc định của lớp nhóm (lớp 1 kèm 1 là 1). */
@@ -31,6 +32,7 @@ export class ClassService {
     private readonly repo: ClassRepository,
     private readonly user: UserService,
     private readonly notifier: NotificationNotifier,
+    private readonly userLink: UserLinkClient,
   ) {}
 
   async generateNewCodeService(): Promise<string> {
@@ -222,6 +224,16 @@ export class ClassService {
       studentIds: uniqueIds,
     });
     if (!updated) throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
+    // Gia sư học sinh theo gia sư lớp: user-service ghi, sau khi roster/gia sư lớp đã commit.
+    if (uniqueIds || tutorChanged) {
+      const linkIds = uniqueIds ?? [...currentIds];
+      if (linkIds.length > 0) {
+        await this.userLink.linkStudentsToTutor(
+          { id: userId, role },
+          { classId: id, studentIds: linkIds },
+        );
+      }
+    }
     return updated;
   }
 
@@ -413,11 +425,9 @@ export class ClassService {
       throw new BadRequestException(ERROR_MESSAGES.CLASS_TUTOR_CONFLICT);
     }
 
-    const inserted = await this.repo.addStudents({
-      classId,
-      studentIds,
-      tutorId: classData.tutorId,
-    });
+    const inserted = await this.repo.addStudents({ classId, studentIds });
+    // Gia sư học sinh theo gia sư lớp: user-service ghi. Gọi với mọi id yêu cầu (idempotent) để retry có tác dụng.
+    await this.userLink.linkStudentsToTutor({ id: userId, role }, { classId, studentIds });
     const addedIds = inserted.map((row) => row.studentId);
 
     await this.notifier.notifyUsers({
@@ -461,12 +471,10 @@ export class ClassService {
     if (!classData || !canActOnOwned({ userId, role }, classData.tutorId))
       throw new NotFoundException(ERROR_MESSAGES.CLASS_NOT_FOUND);
 
-    const removed = await this.repo.removeStudent({
-      classId,
-      studentId,
-      tutorId: classData.tutorId,
-    });
+    const removed = await this.repo.removeStudent({ classId, studentId });
     if (removed === 0) throw new NotFoundException(ERROR_MESSAGES.STUDENT_NOT_IN_CLASS);
+    // user-service clears the parent link once the student has no enrollment left
+    await this.userLink.releaseStudentParent({ id: userId, role }, { classId, studentId });
 
     return { classId, studentId, removed: true };
   }

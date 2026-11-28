@@ -1,7 +1,20 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
 
-const USER_LOOKUP_FIELDS = ['id', 'email', 'username', 'phone', 'userCode'] as const;
+/**
+ * Only the id is looked up (the sole caller, ExerciseService, resolves a student by id). Email,
+ * phone, username and userCode are deliberately not searchable from this service.
+ */
+const USER_LOOKUP_FIELDS = ['id'] as const;
+
+/** Columns returned by getUserByField — never the password (or any other credential) column. */
+const USER_LOOKUP_SELECT = {
+  id: true,
+  firstName: true,
+  lastName: true,
+  role: true,
+  tutorId: true,
+} as const;
 
 /**
  * Read-only lookup against the shared `users` table (owned/migrated by the `USER` service —
@@ -21,7 +34,10 @@ export class UserService {
     value: string;
   }) {
     if (!USER_LOOKUP_FIELDS.includes(field)) return [];
-    return this.prisma.user.findMany({ where: { [field]: value } });
+    return this.prisma.user.findMany({
+      where: { [field]: value },
+      select: USER_LOOKUP_SELECT,
+    });
   }
 
   /** Cheap existence check (id only) — use instead of getUserByField when the row isn't needed. */
